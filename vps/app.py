@@ -6,15 +6,13 @@ import os
 import subprocess
 import secrets
 import re
-import crypt
-import spwd
 from pathlib import Path
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("STM_SECRET", secrets.token_hex(32))
-app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24h
+app.config["PERMANENT_SESSION_LIFETIME"] = 86400
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
@@ -26,14 +24,14 @@ PANEL_USER = os.environ.get("STM_PANEL_USER", "stm-admin")
 # ── Auth ────────────────────────────────────────────────────
 
 def verify_password(username, password):
-    """Verify against system shadow database."""
+    """Verify against system shadow via su."""
     try:
-        sp = spwd.getspnam(username)
-        stored = sp.sp_pwdp
-        if stored in ("!", "*", "!!", ""):
-            return False
-        return crypt.crypt(password, stored) == stored
-    except (KeyError, PermissionError):
+        r = subprocess.run(
+            ["su", "-s", "/bin/sh", "-c", "true", username],
+            input=password + "\n", capture_output=True, text=True, timeout=5
+        )
+        return r.returncode == 0
+    except Exception:
         return False
 
 def login_required(f):
@@ -66,11 +64,7 @@ def run(cmd, check=True):
 
 def get_active_tunnels():
     r = run("ss -tlnp 2>/dev/null | grep -E ':[0-9]' || true", check=False)
-    lines = []
-    for line in r.stdout.strip().split("\n"):
-        if line.strip():
-            lines.append(line.strip())
-    return lines
+    return [l.strip() for l in r.stdout.strip().split("\n") if l.strip()]
 
 def get_ufw_status():
     r = run("ufw status numbered 2>/dev/null || echo 'ufw not active'", check=False)
@@ -82,7 +76,6 @@ def get_ufw_status():
 def login():
     if session.get("logged_in"):
         return redirect(url_for("index"))
-
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -93,8 +86,6 @@ def login():
             return redirect(url_for("index"))
         else:
             flash("Неверный логин или пароль", "error")
-            return redirect(url_for("login"))
-
     return render_template("login.html")
 
 @app.route("/logout")
@@ -110,9 +101,7 @@ def index():
     cfg = load_config()
     if not cfg.get("setup_complete"):
         return redirect(url_for("setup"))
-    active = get_active_tunnels()
-    return render_template("dashboard.html", config=cfg, active_tunnels=active)
-
+    return render_template("dashboard.html", config=cfg, active_tunnels=get_active_tunnels())
 
 @app.route("/setup", methods=["GET", "POST"])
 @login_required
@@ -120,7 +109,6 @@ def setup():
     cfg = load_config()
     if request.method == "POST":
         action = request.form.get("action")
-
         if action == "create_user":
             username = request.form.get("username", "tunnel").strip()
             if not re.match(r'^[a-z_][a-z0-9_-]*$', username):
@@ -130,14 +118,12 @@ def setup():
             r = run(f"id {username} 2>/dev/null", check=False)
             if r.returncode != 0:
                 run(f"useradd --system --create-home --shell /usr/sbin/nologin {username}")
-                run(f"mkdir -p /home/{username}/.ssh")
-                run(f"chmod 700 /home/{username}/.ssh")
+                run(f"mkdir -p /home/{username}/.ssh && chmod 700 /home/{username}/.ssh")
                 run(f"chown -R {username}:{username} /home/{username}/.ssh")
                 flash(f"User '{username}' created", "success")
             else:
                 flash(f"User '{username}' already exists", "info")
             save_config(cfg)
-
         elif action == "generate_key":
             username = cfg.get("tunnel_user", "tunnel")
             key_path = KEYS_DIR / f"{username}_key"
@@ -145,38 +131,31 @@ def setup():
                 key_path.unlink()
                 Path(f"{key_path}.pub").unlink(missing_ok=True)
             run(f'ssh-keygen -t ed25519 -f {key_path} -N "" -C "tunnel-{username}"')
-            pub_key = Path(f"{key_path}.pub").read_text().strip()
-            cfg["public_key"] = pub_key
+            cfg["public_key"] = Path(f"{key_path}.pub").read_text().strip()
             save_config(cfg)
-            flash("SSH key generated. Configure tunnels to set up authorized_keys.", "success")
-
+            flash("SSH key generated", "success")
         elif action == "apply_sshd":
             gw = request.form.get("gateway_ports", "clientspecified")
             cfg["gateway_ports"] = gw
             save_config(cfg)
             sshd_conf = Path("/etc/ssh/sshd_config").read_text()
             if re.search(r'^GatewayPorts\s', sshd_conf, re.MULTILINE):
-                sshd_conf = re.sub(r'^GatewayPorts\s+.*$', f'GatewayPorts {gw}',
-                                   sshd_conf, flags=re.MULTILINE)
+                sshd_conf = re.sub(r'^GatewayPorts\s+.*$', f'GatewayPorts {gw}', sshd_conf, flags=re.MULTILINE)
             else:
                 sshd_conf += f"\nGatewayPorts {gw}\n"
             Path("/etc/ssh/sshd_config").write_text(sshd_conf)
             run("systemctl restart sshd")
             flash("sshd_config updated & restarted", "success")
-
         elif action == "complete_setup":
             cfg["setup_complete"] = True
             _rebuild_authorized_keys(cfg)
             save_config(cfg)
             flash("Setup complete!", "success")
             return redirect(url_for("index"))
-
         return redirect(url_for("setup"))
-
     key_path = KEYS_DIR / f"{cfg.get('tunnel_user', 'tunnel')}_key"
     private_key = key_path.read_text() if key_path.exists() else None
     return render_template("setup.html", config=cfg, private_key=private_key)
-
 
 @app.route("/tunnels", methods=["GET", "POST"])
 @login_required
@@ -184,7 +163,6 @@ def tunnels():
     cfg = load_config()
     if request.method == "POST":
         action = request.form.get("action")
-
         if action == "add":
             name = request.form.get("name", "").strip()
             remote_port = request.form.get("remote_port", "").strip()
@@ -194,19 +172,16 @@ def tunnels():
                 flash("All fields required", "error")
                 return redirect(url_for("tunnels"))
             try:
-                rp = int(remote_port)
-                lp = int(local_port)
+                rp, lp = int(remote_port), int(local_port)
                 if not (1 <= rp <= 65535 and 1 <= lp <= 65535):
                     raise ValueError
             except ValueError:
                 flash("Ports must be 1-65535", "error")
                 return redirect(url_for("tunnels"))
-            tunnel = {"name": name, "remote_port": rp, "local_ip": local_ip, "local_port": lp}
-            cfg["tunnels"].append(tunnel)
+            cfg["tunnels"].append({"name": name, "remote_port": rp, "local_ip": local_ip, "local_port": lp})
             save_config(cfg)
             _rebuild_authorized_keys(cfg)
             flash(f"Tunnel '{name}' added", "success")
-
         elif action == "delete":
             idx = int(request.form.get("index", -1))
             if 0 <= idx < len(cfg["tunnels"]):
@@ -214,12 +189,8 @@ def tunnels():
                 save_config(cfg)
                 _rebuild_authorized_keys(cfg)
                 flash(f"Tunnel '{removed['name']}' removed", "success")
-
         return redirect(url_for("tunnels"))
-
-    active = get_active_tunnels()
-    return render_template("tunnels.html", config=cfg, active_tunnels=active)
-
+    return render_template("tunnels.html", config=cfg, active_tunnels=get_active_tunnels())
 
 @app.route("/firewall", methods=["GET", "POST"])
 @login_required
@@ -227,7 +198,6 @@ def firewall():
     cfg = load_config()
     if request.method == "POST":
         action = request.form.get("action")
-
         if action == "open_port":
             port = request.form.get("port", "").strip()
             source = request.form.get("source", "").strip()
@@ -244,32 +214,23 @@ def firewall():
             else:
                 run(f'ufw allow {p}/tcp comment "{comment}"')
             flash(f"Port {p} opened", "success")
-
         elif action == "close_port":
             rule_num = request.form.get("rule_num", "").strip()
             if rule_num:
                 run(f"ufw --force delete {rule_num}", check=False)
                 flash("Rule deleted", "success")
-
         elif action == "auto_open":
             for t in cfg["tunnels"]:
-                run(f'ufw allow {t["remote_port"]}/tcp comment "Tunnel: {t["name"]}"',
-                    check=False)
+                run(f'ufw allow {t["remote_port"]}/tcp comment "Tunnel: {t["name"]}"', check=False)
             flash("Firewall rules synced with tunnels", "success")
-
         return redirect(url_for("firewall"))
-
-    ufw = get_ufw_status()
-    return render_template("firewall.html", config=cfg, ufw_status=ufw)
-
+    return render_template("firewall.html", config=cfg, ufw_status=get_ufw_status())
 
 @app.route("/api/status")
 @login_required
 def api_status():
     cfg = load_config()
-    active = get_active_tunnels()
-    return jsonify({"tunnels": cfg["tunnels"], "active": active})
-
+    return jsonify({"tunnels": cfg["tunnels"], "active": get_active_tunnels()})
 
 @app.route("/api/private-key")
 @login_required
@@ -280,7 +241,6 @@ def api_private_key():
         return key_path.read_text(), 200, {"Content-Type": "text/plain"}
     return "No key generated", 404
 
-
 # ── Internal ────────────────────────────────────────────────
 
 def _rebuild_authorized_keys(cfg):
@@ -288,14 +248,9 @@ def _rebuild_authorized_keys(cfg):
     pub_key = cfg.get("public_key")
     if not pub_key:
         return
-
-    permits = ",".join(
-        f'permitlisten="0.0.0.0:{t["remote_port"]}"'
-        for t in cfg["tunnels"]
-    )
+    permits = ",".join(f'permitlisten="0.0.0.0:{t["remote_port"]}"' for t in cfg["tunnels"])
     if not permits:
         permits = 'permitlisten="localhost:1"'
-
     auth_line = (
         f'command="/bin/false",no-agent-forwarding,no-X11-forwarding,'
         f'no-pty,permitopen="localhost:1",{permits} {pub_key}'
@@ -305,7 +260,6 @@ def _rebuild_authorized_keys(cfg):
     auth_path.write_text(auth_line + "\n")
     run(f"chmod 600 {auth_path}")
     run(f"chown {username}:{username} {auth_path}")
-
 
 # ── Main ────────────────────────────────────────────────────
 

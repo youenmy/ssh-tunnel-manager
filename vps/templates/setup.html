@@ -5,7 +5,6 @@
 <h1>Настройка VPS</h1>
 
 <div class="setup-steps">
-    <!-- Step 1: User -->
     <div class="step">
         <h2>1. Пользователь для туннеля</h2>
         <p>Системный пользователь без shell — даже при утечке ключа злоумышленник не попадёт на сервер.</p>
@@ -19,7 +18,6 @@
         </form>
     </div>
 
-    <!-- Step 2: SSH Key -->
     <div class="step">
         <h2>2. SSH-ключ</h2>
         <p>Генерация Ed25519 ключа. Приватный ключ нужно будет скопировать на роутер.</p>
@@ -42,7 +40,6 @@
         {% endif %}
     </div>
 
-    <!-- Step 3: SSHD -->
     <div class="step">
         <h2>3. Настройка SSHD</h2>
         <p>GatewayPorts определяет, на каком адресе слушают проброшенные порты.</p>
@@ -60,7 +57,6 @@
         </form>
     </div>
 
-    <!-- Step 4: Complete -->
     <div class="step">
         <h2>4. Завершить настройку</h2>
         <p>После этого перейдите во вкладку «Туннели» для добавления проброса портов.</p>
@@ -69,38 +65,19 @@
             <button type="submit" class="btn btn-primary">✓ Завершить настройку</button>
         </form>
     </div>
+</div>
 
-    <!-- Password change -->
-    <div class="step">
-        <h2>🔑 Сменить пароль панели</h2>
-        <form method="post" action="{{ url_for('change_password') }}">
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>Текущий пароль:</label>
-                    <input type="password" name="old_password" required>
-                </div>
-                <div class="form-group">
-                    <label>Новый пароль:</label>
-                    <input type="password" name="new_password" required minlength="6">
-                </div>
-                <div class="form-group">
-                    <label>Повтор:</label>
-                    <input type="password" name="new_password2" required minlength="6">
-                </div>
-            </div>
-            <button type="submit" class="btn">Сменить пароль</button>
-        </form>
-    </div>
+<div class="step" style="margin-top:16px">
+    <h2>Смена пароля панели</h2>
+    <p class="muted">Выполните в SSH: <code>passwd stm-admin</code></p>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 function copyKey() {
-    const text = document.getElementById('private-key').textContent;
-    navigator.clipboard.writeText(text).then(() => {
-        alert('Ключ скопирован!');
-    });
+    navigator.clipboard.writeText(document.getElementById('private-key').textContent)
+        .then(() => alert('Ключ скопирован!'));
 }
 </script>
 {% endblock %}
