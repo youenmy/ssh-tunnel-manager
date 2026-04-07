@@ -10,6 +10,7 @@ APP_DIR="/opt/ssh-tunnel-manager"
 SERVICE_NAME="ssh-tunnel-manager"
 VENV_DIR="$APP_DIR/venv"
 PORT=7575
+PANEL_USER="stm-admin"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,7 +47,7 @@ for f in app.py requirements.txt; do
 done
 
 mkdir -p "$APP_DIR/templates" "$APP_DIR/static"
-for f in base.html dashboard.html setup.html tunnels.html firewall.html; do
+for f in base.html dashboard.html setup.html tunnels.html firewall.html login.html; do
     curl -fsSL "$REPO_BASE/templates/$f" -o "$APP_DIR/templates/$f"
 done
 curl -fsSL "$REPO_BASE/static/style.css" -o "$APP_DIR/static/style.css"
@@ -56,6 +57,25 @@ info "Setting up Python environment..."
 python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install -q --upgrade pip
 "$VENV_DIR/bin/pip" install -q -r "$APP_DIR/requirements.txt"
+
+# --- Generate panel credentials ---
+PANEL_PASS=$(openssl rand -base64 12 | tr -d '/+=')
+
+if id "$PANEL_USER" &>/dev/null; then
+    echo "$PANEL_USER:$PANEL_PASS" | chpasswd
+    ok "Panel user '$PANEL_USER' password updated"
+else
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$PANEL_USER"
+    echo "$PANEL_USER:$PANEL_PASS" | chpasswd
+    ok "Panel user '$PANEL_USER' created"
+fi
+
+# Save credentials to a file readable only by root
+cat > "$APP_DIR/data/credentials" << EOF
+Panel Login: $PANEL_USER
+Panel Password: $PANEL_PASS
+EOF
+chmod 600 "$APP_DIR/data/credentials"
 
 # --- Config ---
 if [[ ! -f "$APP_DIR/data/config.json" ]]; then
@@ -85,6 +105,7 @@ ExecStart=$VENV_DIR/bin/python app.py
 Restart=always
 RestartSec=5
 Environment=STM_PORT=$PORT
+Environment=STM_PANEL_USER=$PANEL_USER
 
 [Install]
 WantedBy=multi-user.target
@@ -92,7 +113,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
-systemctl start "$SERVICE_NAME"
+systemctl restart "$SERVICE_NAME"
 
 # --- Ensure sshd config ---
 if ! grep -q "^GatewayPorts" /etc/ssh/sshd_config; then
@@ -106,11 +127,15 @@ ufw allow "$PORT/tcp" comment "SSH Tunnel Manager UI" > /dev/null 2>&1
 
 ok "Installation complete!"
 echo ""
-echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║  SSH Tunnel Manager is running!               ║${NC}"
-echo -e "${GREEN}║                                               ║${NC}"
-echo -e "${GREEN}║  Open: http://YOUR_SERVER_IP:${PORT}            ║${NC}"
-echo -e "${GREEN}║                                               ║${NC}"
-echo -e "${GREEN}║  Complete setup in the web interface.          ║${NC}"
-echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
+echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║  SSH Tunnel Manager installed!                    ║${NC}"
+echo -e "${GREEN}║                                                   ║${NC}"
+echo -e "${GREEN}║  URL:      http://YOUR_SERVER_IP:${PORT}            ║${NC}"
+echo -e "${GREEN}║                                                   ║${NC}"
+echo -e "${GREEN}║  Login:    ${CYAN}${PANEL_USER}${GREEN}                          ║${NC}"
+echo -e "${GREEN}║  Password: ${CYAN}${PANEL_PASS}${GREEN}               ║${NC}"
+echo -e "${GREEN}║                                                   ║${NC}"
+echo -e "${GREEN}║  Credentials saved: ${APP_DIR}/data/credentials     ║${NC}"
+echo -e "${GREEN}║  Change password:   passwd ${PANEL_USER}              ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""

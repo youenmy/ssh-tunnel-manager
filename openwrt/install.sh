@@ -1,12 +1,12 @@
 #!/bin/sh
 # ============================================================
 #  SSH Tunnel Manager — OpenWrt Installer
-#  Usage: curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/openwrt/install.sh | sh
+#  Usage: curl -fsSL https://raw.githubusercontent.com/YOUR_USER/ssh-tunnel-manager/main/openwrt/install.sh | sh
 # ============================================================
 
 set -e
 
-REPO_BASE="https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/openwrt"
+REPO_BASE="https://raw.githubusercontent.com/YOUR_USER/ssh-tunnel-manager/main/openwrt"
 
 echo "╔═══════════════════════════════════════════╗"
 echo "║  SSH Tunnel Manager — OpenWrt Installer   ║"

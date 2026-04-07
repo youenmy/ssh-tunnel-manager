@@ -1,22 +1,48 @@
 #!/usr/bin/env python3
-"""SSH Tunnel Manager — VPS Web UI"""
+"""SSH Tunnel Manager — VPS Web UI with system user auth"""
 
 import json
 import os
 import subprocess
 import secrets
 import re
+import crypt
+import spwd
 from pathlib import Path
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("STM_SECRET", secrets.token_hex(32))
+app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24h
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 KEYS_DIR = BASE_DIR / "keys"
 CONFIG_FILE = DATA_DIR / "config.json"
+
+PANEL_USER = os.environ.get("STM_PANEL_USER", "stm-admin")
+
+# ── Auth ────────────────────────────────────────────────────
+
+def verify_password(username, password):
+    """Verify against system shadow database."""
+    try:
+        sp = spwd.getspnam(username)
+        stored = sp.sp_pwdp
+        if stored in ("!", "*", "!!", ""):
+            return False
+        return crypt.crypt(password, stored) == stored
+    except (KeyError, PermissionError):
+        return False
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
 
 # ── Config helpers ──────────────────────────────────────────
 
@@ -39,7 +65,6 @@ def run(cmd, check=True):
     return r
 
 def get_active_tunnels():
-    """Show currently listening tunnel ports."""
     r = run("ss -tlnp 2>/dev/null | grep -E ':[0-9]' || true", check=False)
     lines = []
     for line in r.stdout.strip().split("\n"):
@@ -51,9 +76,36 @@ def get_ufw_status():
     r = run("ufw status numbered 2>/dev/null || echo 'ufw not active'", check=False)
     return r.stdout.strip()
 
+# ── Auth Routes ─────────────────────────────────────────────
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("logged_in"):
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        if verify_password(username, password):
+            session["logged_in"] = True
+            session["username"] = username
+            session.permanent = True
+            return redirect(url_for("index"))
+        else:
+            flash("Неверный логин или пароль", "error")
+            return redirect(url_for("login"))
+
+    return render_template("login.html")
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
 # ── Routes ──────────────────────────────────────────────────
 
 @app.route("/")
+@login_required
 def index():
     cfg = load_config()
     if not cfg.get("setup_complete"):
@@ -63,6 +115,7 @@ def index():
 
 
 @app.route("/setup", methods=["GET", "POST"])
+@login_required
 def setup():
     cfg = load_config()
     if request.method == "POST":
@@ -74,7 +127,6 @@ def setup():
                 flash("Invalid username", "error")
                 return redirect(url_for("setup"))
             cfg["tunnel_user"] = username
-            # Create system user
             r = run(f"id {username} 2>/dev/null", check=False)
             if r.returncode != 0:
                 run(f"useradd --system --create-home --shell /usr/sbin/nologin {username}")
@@ -93,7 +145,6 @@ def setup():
                 key_path.unlink()
                 Path(f"{key_path}.pub").unlink(missing_ok=True)
             run(f'ssh-keygen -t ed25519 -f {key_path} -N "" -C "tunnel-{username}"')
-            # Install public key with restrictions
             pub_key = Path(f"{key_path}.pub").read_text().strip()
             cfg["public_key"] = pub_key
             save_config(cfg)
@@ -103,7 +154,6 @@ def setup():
             gw = request.form.get("gateway_ports", "clientspecified")
             cfg["gateway_ports"] = gw
             save_config(cfg)
-            # Update sshd_config
             sshd_conf = Path("/etc/ssh/sshd_config").read_text()
             if re.search(r'^GatewayPorts\s', sshd_conf, re.MULTILINE):
                 sshd_conf = re.sub(r'^GatewayPorts\s+.*$', f'GatewayPorts {gw}',
@@ -123,13 +173,13 @@ def setup():
 
         return redirect(url_for("setup"))
 
-    # GET
     key_path = KEYS_DIR / f"{cfg.get('tunnel_user', 'tunnel')}_key"
     private_key = key_path.read_text() if key_path.exists() else None
     return render_template("setup.html", config=cfg, private_key=private_key)
 
 
 @app.route("/tunnels", methods=["GET", "POST"])
+@login_required
 def tunnels():
     cfg = load_config()
     if request.method == "POST":
@@ -172,6 +222,7 @@ def tunnels():
 
 
 @app.route("/firewall", methods=["GET", "POST"])
+@login_required
 def firewall():
     cfg = load_config()
     if request.method == "POST":
@@ -201,7 +252,6 @@ def firewall():
                 flash("Rule deleted", "success")
 
         elif action == "auto_open":
-            # Open ports for all configured tunnels
             for t in cfg["tunnels"]:
                 run(f'ufw allow {t["remote_port"]}/tcp comment "Tunnel: {t["name"]}"',
                     check=False)
@@ -214,6 +264,7 @@ def firewall():
 
 
 @app.route("/api/status")
+@login_required
 def api_status():
     cfg = load_config()
     active = get_active_tunnels()
@@ -221,6 +272,7 @@ def api_status():
 
 
 @app.route("/api/private-key")
+@login_required
 def api_private_key():
     cfg = load_config()
     key_path = KEYS_DIR / f"{cfg.get('tunnel_user', 'tunnel')}_key"
@@ -229,34 +281,9 @@ def api_private_key():
     return "No key generated", 404
 
 
-@app.route("/api/generate-router-script")
-def generate_router_script():
-    """Generate an install command for the OpenWrt side."""
-    cfg = load_config()
-    key_path = KEYS_DIR / f"{cfg.get('tunnel_user', 'tunnel')}_key"
-    private_key = key_path.read_text().strip() if key_path.exists() else "KEY_NOT_GENERATED"
-
-    vps_ip = request.host.split(":")[0]
-    tunnels_args = " ".join(
-        f"-R 0.0.0.0:{t['remote_port']}:{t['local_ip']}:{t['local_port']}"
-        for t in cfg["tunnels"]
-    )
-
-    script = f"""#!/bin/sh
-# Auto-generated router install snippet
-# Run on OpenWrt: curl -fsSL http://{request.host}/api/generate-router-script | sh
-
-VPS_IP="{vps_ip}"
-VPS_USER="{cfg.get('tunnel_user', 'tunnel')}"
-TUNNELS="{tunnels_args}"
-"""
-    return script, 200, {"Content-Type": "text/plain"}
-
-
 # ── Internal ────────────────────────────────────────────────
 
 def _rebuild_authorized_keys(cfg):
-    """Rebuild authorized_keys with permitlisten for all configured tunnels."""
     username = cfg.get("tunnel_user", "tunnel")
     pub_key = cfg.get("public_key")
     if not pub_key:

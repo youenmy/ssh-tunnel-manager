@@ -14,18 +14,22 @@
         </div>
         <ul class="nav-links">
             <li><a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}">
-                <span class="icon">📊</span> Статус
+                <span class="icon">📊</span><span class="nav-label"> Статус</span>
             </a></li>
             <li><a href="{{ url_for('tunnels') }}" class="{% if request.endpoint == 'tunnels' %}active{% endif %}">
-                <span class="icon">🔗</span> Туннели
+                <span class="icon">🔗</span><span class="nav-label"> Туннели</span>
             </a></li>
             <li><a href="{{ url_for('firewall') }}" class="{% if request.endpoint == 'firewall' %}active{% endif %}">
-                <span class="icon">🛡️</span> Файрвол
+                <span class="icon">🛡️</span><span class="nav-label"> Файрвол</span>
             </a></li>
             <li><a href="{{ url_for('setup') }}" class="{% if request.endpoint == 'setup' %}active{% endif %}">
-                <span class="icon">⚙️</span> Настройка
+                <span class="icon">⚙️</span><span class="nav-label"> Настройка</span>
             </a></li>
         </ul>
+        <div class="sidebar-footer">
+            <span class="user-badge">👤 {{ session.get('username', '') }}</span>
+            <a href="{{ url_for('logout') }}" class="logout-link">Выйти</a>
+        </div>
     </nav>
 
     <main class="content">

@@ -69,6 +69,28 @@
             <button type="submit" class="btn btn-primary">✓ Завершить настройку</button>
         </form>
     </div>
+
+    <!-- Password change -->
+    <div class="step">
+        <h2>🔑 Сменить пароль панели</h2>
+        <form method="post" action="{{ url_for('change_password') }}">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Текущий пароль:</label>
+                    <input type="password" name="old_password" required>
+                </div>
+                <div class="form-group">
+                    <label>Новый пароль:</label>
+                    <input type="password" name="new_password" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label>Повтор:</label>
+                    <input type="password" name="new_password2" required minlength="6">
+                </div>
+            </div>
+            <button type="submit" class="btn">Сменить пароль</button>
+        </form>
+    </div>
 </div>
 {% endblock %}
 

@@ -10,13 +10,13 @@
 
 ### 1. VPS (Ubuntu)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/vps/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/YOUR_USER/ssh-tunnel-manager/main/vps/install.sh | sudo bash
 ```
 Откройте `http://YOUR_VPS_IP:7575` → мастер настройки.
 
 ### 2. OpenWrt
 ```bash
-curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/openwrt/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/YOUR_USER/ssh-tunnel-manager/main/openwrt/install.sh | sh
 ```
 LuCI → **Сервисы → SSH Tunnel** → настройте и включите.
 
