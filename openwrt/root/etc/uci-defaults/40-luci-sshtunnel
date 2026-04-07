@@ -1,0 +1,12 @@
+#!/bin/sh
+# Add SSH Tunnel to LuCI Services menu
+
+uci -q batch << EOI
+delete ucitrack.@sshtunnel[-1] 2>/dev/null
+add ucitrack sshtunnel
+set ucitrack.@sshtunnel[-1].init=sshtunnel
+commit ucitrack
+EOI
+
+rm -rf /tmp/luci-modulecache /tmp/luci-indexcache* 2>/dev/null
+exit 0

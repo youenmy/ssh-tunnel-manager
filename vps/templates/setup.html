@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Настройка — Tunnel Manager{% endblock %}
+
+{% block content %}
+<h1>Настройка VPS</h1>
+
+<div class="setup-steps">
+    <!-- Step 1: User -->
+    <div class="step">
+        <h2>1. Пользователь для туннеля</h2>
+        <p>Системный пользователь без shell — даже при утечке ключа злоумышленник не попадёт на сервер.</p>
+        <form method="post">
+            <input type="hidden" name="action" value="create_user">
+            <div class="form-row">
+                <label>Имя пользователя:</label>
+                <input type="text" name="username" value="{{ config.tunnel_user }}" pattern="[a-z_][a-z0-9_-]*" required>
+                <button type="submit" class="btn">Создать</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Step 2: SSH Key -->
+    <div class="step">
+        <h2>2. SSH-ключ</h2>
+        <p>Генерация Ed25519 ключа. Приватный ключ нужно будет скопировать на роутер.</p>
+        <form method="post">
+            <input type="hidden" name="action" value="generate_key">
+            <button type="submit" class="btn">Сгенерировать ключ</button>
+        </form>
+        {% if private_key %}
+        <div class="key-block">
+            <h3>Приватный ключ <small>(скопируйте на роутер)</small></h3>
+            <pre class="key-content" id="private-key">{{ private_key }}</pre>
+            <button class="btn btn-small" onclick="copyKey()">📋 Копировать</button>
+        </div>
+        {% endif %}
+        {% if config.public_key %}
+        <div class="key-block">
+            <h3>Публичный ключ <small>(установлен на VPS)</small></h3>
+            <pre class="key-content">{{ config.public_key }}</pre>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Step 3: SSHD -->
+    <div class="step">
+        <h2>3. Настройка SSHD</h2>
+        <p>GatewayPorts определяет, на каком адресе слушают проброшенные порты.</p>
+        <form method="post">
+            <input type="hidden" name="action" value="apply_sshd">
+            <div class="form-row">
+                <label>GatewayPorts:</label>
+                <select name="gateway_ports">
+                    <option value="clientspecified" {% if config.gateway_ports == 'clientspecified' %}selected{% endif %}>clientspecified (рекомендуется)</option>
+                    <option value="yes" {% if config.gateway_ports == 'yes' %}selected{% endif %}>yes</option>
+                    <option value="no" {% if config.gateway_ports == 'no' %}selected{% endif %}>no</option>
+                </select>
+                <button type="submit" class="btn">Применить</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Step 4: Complete -->
+    <div class="step">
+        <h2>4. Завершить настройку</h2>
+        <p>После этого перейдите во вкладку «Туннели» для добавления проброса портов.</p>
+        <form method="post">
+            <input type="hidden" name="action" value="complete_setup">
+            <button type="submit" class="btn btn-primary">✓ Завершить настройку</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyKey() {
+    const text = document.getElementById('private-key').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Ключ скопирован!');
+    });
+}
+</script>
+{% endblock %}

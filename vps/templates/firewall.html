@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Файрвол — Tunnel Manager{% endblock %}
+
+{% block content %}
+<h1>Управление файрволом (UFW)</h1>
+
+<div class="add-form">
+    <h2>Открыть порт</h2>
+    <form method="post">
+        <input type="hidden" name="action" value="open_port">
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Порт:</label>
+                <input type="number" name="port" min="1" max="65535" required>
+            </div>
+            <div class="form-group">
+                <label>Только для IP <small>(пусто = все)</small>:</label>
+                <input type="text" name="source" placeholder="203.0.113.50">
+            </div>
+            <div class="form-group">
+                <label>Комментарий:</label>
+                <input type="text" name="comment" placeholder="RDP tunnel">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Открыть порт</button>
+    </form>
+</div>
+
+<div class="add-form">
+    <h2>Быстрые действия</h2>
+    <form method="post" style="display:inline">
+        <input type="hidden" name="action" value="auto_open">
+        <button type="submit" class="btn">🔄 Синхронизировать с туннелями</button>
+    </form>
+    <p class="muted">Откроет порты для всех настроенных туннелей.</p>
+</div>
+
+<h2>Текущие правила</h2>
+<pre class="log-output">{{ ufw_status }}</pre>
+
+<h2>Удалить правило</h2>
+<form method="post">
+    <input type="hidden" name="action" value="close_port">
+    <div class="form-row">
+        <label>Номер правила (из списка выше):</label>
+        <input type="number" name="rule_num" min="1" required>
+        <button type="submit" class="btn btn-danger" onclick="return confirm('Удалить правило?')">Удалить</button>
+    </div>
+</form>
+{% endblock %}

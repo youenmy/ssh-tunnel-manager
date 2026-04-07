@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Статус — Tunnel Manager{% endblock %}
+
+{% block content %}
+<h1>Статус системы</h1>
+
+<div class="cards">
+    <div class="card">
+        <div class="card-header">Пользователь туннеля</div>
+        <div class="card-value">{{ config.tunnel_user }}</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Настроено туннелей</div>
+        <div class="card-value">{{ config.tunnels | length }}</div>
+    </div>
+    <div class="card">
+        <div class="card-header">GatewayPorts</div>
+        <div class="card-value">{{ config.gateway_ports }}</div>
+    </div>
+</div>
+
+<h2>Настроенные туннели</h2>
+{% if config.tunnels %}
+<table>
+    <thead>
+        <tr>
+            <th>Имя</th>
+            <th>VPS порт</th>
+            <th>Цель (IP:порт)</th>
+            <th>Статус</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in config.tunnels %}
+        <tr>
+            <td>{{ t.name }}</td>
+            <td>{{ t.remote_port }}</td>
+            <td>{{ t.local_ip }}:{{ t.local_port }}</td>
+            <td>
+                {% set port_str = ":" ~ t.remote_port|string %}
+                {% if active_tunnels|join(' ') is search(port_str) %}
+                    <span class="badge badge-ok">● Активен</span>
+                {% else %}
+                    <span class="badge badge-off">○ Неактивен</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">Туннели не настроены. <a href="{{ url_for('tunnels') }}">Добавить →</a></p>
+{% endif %}
+
+<h2>Активные порты на сервере</h2>
+<pre class="log-output">{% for line in active_tunnels %}{{ line }}
+{% endfor %}</pre>
+{% endblock %}

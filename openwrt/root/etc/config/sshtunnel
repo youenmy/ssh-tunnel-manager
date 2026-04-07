@@ -1,0 +1,16 @@
+config sshtunnel 'global'
+    option enabled '0'
+    option vps_ip ''
+    option vps_port '22'
+    option vps_user 'tunnel'
+    option key_path '/root/.ssh/tunnel_key'
+    option alive_interval '30'
+    option alive_count '3'
+
+# Example tunnel — uncomment and edit:
+# config tunnel
+#     option enabled '1'
+#     option name 'RDP'
+#     option remote_port '3389'
+#     option local_ip '192.168.1.100'
+#     option local_port '3389'

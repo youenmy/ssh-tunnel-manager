@@ -1,0 +1,78 @@
+#!/bin/sh /etc/rc.common
+# SSH Tunnel Manager — procd init script
+
+START=99
+USE_PROCD=1
+
+CONF="sshtunnel"
+
+validate_section() {
+    uci_validate_section "$CONF" sshtunnel "$1" \
+        'enabled:bool:0' \
+        'vps_ip:string' \
+        'vps_port:port:22' \
+        'vps_user:string:tunnel' \
+        'key_path:string:/root/.ssh/tunnel_key' \
+        'alive_interval:uinteger:30' \
+        'alive_count:uinteger:3'
+}
+
+start_service() {
+    local enabled vps_ip vps_port vps_user key_path alive_interval alive_count
+
+    config_load "$CONF"
+    validate_section "global" || return 1
+
+    [ "$enabled" = "1" ] || return 0
+    [ -n "$vps_ip" ] || { logger -t sshtunnel "VPS IP not set"; return 1; }
+    [ -f "$key_path" ] || { logger -t sshtunnel "Key not found: $key_path"; return 1; }
+
+    # Build -R arguments from tunnel sections
+    local tunnel_args=""
+    build_tunnel() {
+        local remote_port local_ip local_port t_enabled
+        config_get remote_port "$1" remote_port
+        config_get local_ip "$1" local_ip
+        config_get local_port "$1" local_port
+        config_get t_enabled "$1" enabled "1"
+
+        [ "$t_enabled" = "1" ] || return 0
+        [ -n "$remote_port" ] && [ -n "$local_ip" ] && [ -n "$local_port" ] && {
+            tunnel_args="$tunnel_args -R 0.0.0.0:${remote_port}:${local_ip}:${local_port}"
+        }
+    }
+    config_foreach build_tunnel tunnel
+
+    [ -n "$tunnel_args" ] || { logger -t sshtunnel "No tunnels configured"; return 0; }
+
+    # Determine autossh path
+    local autossh_bin
+    if [ -x /usr/sbin/autossh ]; then
+        autossh_bin="/usr/sbin/autossh"
+    elif [ -x /usr/bin/autossh ]; then
+        autossh_bin="/usr/bin/autossh"
+    else
+        logger -t sshtunnel "autossh not found"
+        return 1
+    fi
+
+    procd_open_instance "sshtunnel"
+    procd_set_param command $autossh_bin -M 0 -N \
+        -o "ServerAliveInterval=$alive_interval" \
+        -o "ServerAliveCountMax=$alive_count" \
+        -o "ExitOnForwardFailure=yes" \
+        -o "StrictHostKeyChecking=accept-new" \
+        -i "$key_path" \
+        -p "$vps_port" \
+        $tunnel_args \
+        "${vps_user}@${vps_ip}"
+
+    procd_set_param respawn 3600 5 5
+    procd_set_param stderr 1
+    procd_set_param stdout 1
+    procd_close_instance
+}
+
+service_triggers() {
+    procd_add_reload_trigger "$CONF"
+}

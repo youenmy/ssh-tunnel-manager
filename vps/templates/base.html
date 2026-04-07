@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SSH Tunnel Manager{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">⚡</div>
+            <span class="logo-text">Tunnel<br>Manager</span>
+        </div>
+        <ul class="nav-links">
+            <li><a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}active{% endif %}">
+                <span class="icon">📊</span> Статус
+            </a></li>
+            <li><a href="{{ url_for('tunnels') }}" class="{% if request.endpoint == 'tunnels' %}active{% endif %}">
+                <span class="icon">🔗</span> Туннели
+            </a></li>
+            <li><a href="{{ url_for('firewall') }}" class="{% if request.endpoint == 'firewall' %}active{% endif %}">
+                <span class="icon">🛡️</span> Файрвол
+            </a></li>
+            <li><a href="{{ url_for('setup') }}" class="{% if request.endpoint == 'setup' %}active{% endif %}">
+                <span class="icon">⚙️</span> Настройка
+            </a></li>
+        </ul>
+    </nav>
+
+    <main class="content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for cat, msg in messages %}
+            <div class="alert alert-{{ cat }}">{{ msg }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

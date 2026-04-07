@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Туннели — Tunnel Manager{% endblock %}
+
+{% block content %}
+<h1>Управление туннелями</h1>
+
+<div class="add-form">
+    <h2>Добавить туннель</h2>
+    <form method="post">
+        <input type="hidden" name="action" value="add">
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Имя:</label>
+                <input type="text" name="name" placeholder="RDP, SMB, Web..." required>
+            </div>
+            <div class="form-group">
+                <label>Порт VPS <small>(внешний)</small>:</label>
+                <input type="number" name="remote_port" min="1" max="65535" placeholder="3389" required>
+            </div>
+            <div class="form-group">
+                <label>IP цели <small>(в домашней сети)</small>:</label>
+                <input type="text" name="local_ip" placeholder="192.168.1.100" required>
+            </div>
+            <div class="form-group">
+                <label>Порт цели <small>(локальный)</small>:</label>
+                <input type="number" name="local_port" min="1" max="65535" placeholder="3389" required>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">+ Добавить туннель</button>
+    </form>
+</div>
+
+<h2>Настроенные туннели</h2>
+{% if config.tunnels %}
+<table>
+    <thead>
+        <tr>
+            <th>Имя</th>
+            <th>VPS порт</th>
+            <th>→ Цель</th>
+            <th>SSH аргумент</th>
+            <th>Статус</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in config.tunnels %}
+        <tr>
+            <td><strong>{{ t.name }}</strong></td>
+            <td>{{ t.remote_port }}</td>
+            <td>{{ t.local_ip }}:{{ t.local_port }}</td>
+            <td><code>-R 0.0.0.0:{{ t.remote_port }}:{{ t.local_ip }}:{{ t.local_port }}</code></td>
+            <td>
+                {% set port_str = ":" ~ t.remote_port|string %}
+                {% if active_tunnels|join(' ') is search(port_str) %}
+                    <span class="badge badge-ok">● Активен</span>
+                {% else %}
+                    <span class="badge badge-off">○ Неактивен</span>
+                {% endif %}
+            </td>
+            <td>
+                <form method="post" style="display:inline">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="index" value="{{ loop.index0 }}">
+                    <button type="submit" class="btn btn-danger btn-small" onclick="return confirm('Удалить?')">✕</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="info-box">
+    <h3>Команда autossh для роутера:</h3>
+    <pre class="log-output">autossh -M 0 -N \
+  -o "ServerAliveInterval=30" \
+  -o "ServerAliveCountMax=3" \
+  -o "ExitOnForwardFailure=yes" \
+  -i /root/.ssh/tunnel_key \
+{% for t in config.tunnels %}  -R 0.0.0.0:{{ t.remote_port }}:{{ t.local_ip }}:{{ t.local_port }} \
+{% endfor %}  {{ config.tunnel_user }}@YOUR_VPS_IP</pre>
+</div>
+{% else %}
+<p class="muted">Туннели не добавлены. Используйте форму выше.</p>
+{% endif %}
+{% endblock %}
