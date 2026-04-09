@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
-"""SSH Tunnel Manager — VPS Web UI with system user auth"""
+"""SSH Tunnel Manager — VPS Web UI"""
 
-import json
-import os
-import subprocess
-import secrets
-import re
+import json, os, subprocess, secrets, re
 from pathlib import Path
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
@@ -18,18 +14,12 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 KEYS_DIR = BASE_DIR / "keys"
 CONFIG_FILE = DATA_DIR / "config.json"
-
 PANEL_USER = os.environ.get("STM_PANEL_USER", "stm-admin")
 
-# ── Auth ────────────────────────────────────────────────────
-
 def verify_password(username, password):
-    """Verify against system shadow via su."""
     try:
-        r = subprocess.run(
-            ["su", "-s", "/bin/sh", "-c", "true", username],
-            input=password + "\n", capture_output=True, text=True, timeout=5
-        )
+        r = subprocess.run(["su", "-s", "/bin/sh", "-c", "true", username],
+                           input=password + "\n", capture_output=True, text=True, timeout=5)
         return r.returncode == 0
     except Exception:
         return False
@@ -42,8 +32,6 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
-# ── Config helpers ──────────────────────────────────────────
-
 def load_config():
     if CONFIG_FILE.exists():
         return json.loads(CONFIG_FILE.read_text())
@@ -53,8 +41,6 @@ def load_config():
 def save_config(cfg):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
-
-# ── Shell helpers ───────────────────────────────────────────
 
 def run(cmd, check=True):
     r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -66,9 +52,31 @@ def get_active_tunnels():
     r = run("ss -tlnp 2>/dev/null | grep -E ':[0-9]' || true", check=False)
     return [l.strip() for l in r.stdout.strip().split("\n") if l.strip()]
 
+def get_active_ports():
+    ports = set()
+    for line in get_active_tunnels():
+        for p in re.findall(r'(?:0\.0\.0\.0|\*):(\d+)', line):
+            ports.add(int(p))
+    return ports
+
 def get_ufw_status():
     r = run("ufw status numbered 2>/dev/null || echo 'ufw not active'", check=False)
     return r.stdout.strip()
+
+def _rebuild_authorized_keys(cfg):
+    username = cfg.get("tunnel_user", "tunnel")
+    pub_key = cfg.get("public_key")
+    if not pub_key:
+        return
+    permits = ",".join(f'permitlisten="0.0.0.0:{t["remote_port"]}"' for t in cfg["tunnels"])
+    if not permits:
+        permits = 'permitlisten="localhost:1"'
+    auth_line = f'command="/bin/false",no-agent-forwarding,no-X11-forwarding,no-pty,permitopen="localhost:1",{permits} {pub_key}'
+    auth_path = Path(f"/home/{username}/.ssh/authorized_keys")
+    auth_path.parent.mkdir(parents=True, exist_ok=True)
+    auth_path.write_text(auth_line + "\n")
+    run(f"chmod 600 {auth_path}")
+    run(f"chown {username}:{username} {auth_path}")
 
 # ── Auth Routes ─────────────────────────────────────────────
 
@@ -93,7 +101,7 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ── Routes ──────────────────────────────────────────────────
+# ── Main Routes ─────────────────────────────────────────────
 
 @app.route("/")
 @login_required
@@ -101,7 +109,8 @@ def index():
     cfg = load_config()
     if not cfg.get("setup_complete"):
         return redirect(url_for("setup"))
-    return render_template("dashboard.html", config=cfg, active_tunnels=get_active_tunnels())
+    return render_template("dashboard.html", config=cfg,
+                           active_tunnels=get_active_tunnels(), active_ports=get_active_ports())
 
 @app.route("/setup", methods=["GET", "POST"])
 @login_required
@@ -133,6 +142,7 @@ def setup():
             run(f'ssh-keygen -t ed25519 -f {key_path} -N "" -C "tunnel-{username}"')
             cfg["public_key"] = Path(f"{key_path}.pub").read_text().strip()
             save_config(cfg)
+            _rebuild_authorized_keys(cfg)
             flash("SSH key generated", "success")
         elif action == "apply_sshd":
             gw = request.form.get("gateway_ports", "clientspecified")
@@ -153,6 +163,7 @@ def setup():
             flash("Setup complete!", "success")
             return redirect(url_for("index"))
         return redirect(url_for("setup"))
+
     key_path = KEYS_DIR / f"{cfg.get('tunnel_user', 'tunnel')}_key"
     private_key = key_path.read_text() if key_path.exists() else None
     return render_template("setup.html", config=cfg, private_key=private_key)
@@ -182,6 +193,27 @@ def tunnels():
             save_config(cfg)
             _rebuild_authorized_keys(cfg)
             flash(f"Tunnel '{name}' added", "success")
+        elif action == "edit":
+            idx = int(request.form.get("index", -1))
+            if 0 <= idx < len(cfg["tunnels"]):
+                name = request.form.get("name", "").strip()
+                remote_port = request.form.get("remote_port", "").strip()
+                local_ip = request.form.get("local_ip", "").strip()
+                local_port = request.form.get("local_port", "").strip()
+                if not all([name, remote_port, local_ip, local_port]):
+                    flash("All fields required", "error")
+                    return redirect(url_for("tunnels", edit=idx))
+                try:
+                    rp, lp = int(remote_port), int(local_port)
+                    if not (1 <= rp <= 65535 and 1 <= lp <= 65535):
+                        raise ValueError
+                except ValueError:
+                    flash("Ports must be 1-65535", "error")
+                    return redirect(url_for("tunnels", edit=idx))
+                cfg["tunnels"][idx] = {"name": name, "remote_port": rp, "local_ip": local_ip, "local_port": lp}
+                save_config(cfg)
+                _rebuild_authorized_keys(cfg)
+                flash(f"Tunnel '{name}' updated", "success")
         elif action == "delete":
             idx = int(request.form.get("index", -1))
             if 0 <= idx < len(cfg["tunnels"]):
@@ -190,7 +222,22 @@ def tunnels():
                 _rebuild_authorized_keys(cfg)
                 flash(f"Tunnel '{removed['name']}' removed", "success")
         return redirect(url_for("tunnels"))
-    return render_template("tunnels.html", config=cfg, active_tunnels=get_active_tunnels())
+
+    # GET - check for edit mode
+    edit_index = request.args.get("edit", None)
+    edit_tunnel = None
+    if edit_index is not None:
+        try:
+            edit_index = int(edit_index)
+            if 0 <= edit_index < len(cfg["tunnels"]):
+                edit_tunnel = cfg["tunnels"][edit_index]
+            else:
+                edit_index = None
+        except ValueError:
+            edit_index = None
+
+    return render_template("tunnels.html", config=cfg, active_tunnels=get_active_tunnels(),
+                           active_ports=get_active_ports(), edit_index=edit_index, edit_tunnel=edit_tunnel)
 
 @app.route("/firewall", methods=["GET", "POST"])
 @login_required
@@ -240,28 +287,6 @@ def api_private_key():
     if key_path.exists():
         return key_path.read_text(), 200, {"Content-Type": "text/plain"}
     return "No key generated", 404
-
-# ── Internal ────────────────────────────────────────────────
-
-def _rebuild_authorized_keys(cfg):
-    username = cfg.get("tunnel_user", "tunnel")
-    pub_key = cfg.get("public_key")
-    if not pub_key:
-        return
-    permits = ",".join(f'permitlisten="0.0.0.0:{t["remote_port"]}"' for t in cfg["tunnels"])
-    if not permits:
-        permits = 'permitlisten="localhost:1"'
-    auth_line = (
-        f'command="/bin/false",no-agent-forwarding,no-X11-forwarding,'
-        f'no-pty,permitopen="localhost:1",{permits} {pub_key}'
-    )
-    auth_path = Path(f"/home/{username}/.ssh/authorized_keys")
-    auth_path.parent.mkdir(parents=True, exist_ok=True)
-    auth_path.write_text(auth_line + "\n")
-    run(f"chmod 600 {auth_path}")
-    run(f"chown {username}:{username} {auth_path}")
-
-# ── Main ────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     port = int(os.environ.get("STM_PORT", 7575))

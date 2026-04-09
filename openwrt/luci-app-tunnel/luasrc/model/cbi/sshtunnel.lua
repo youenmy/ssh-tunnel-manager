@@ -1,4 +1,4 @@
--- SSH Tunnel Manager — LuCI CBI Model
+-- SSH Tunnel Manager — LuCI CBI Model (fixed)
 local sys = require "luci.sys"
 local fs  = require "nixio.fs"
 
@@ -13,73 +13,86 @@ s = m:section(NamedSection, "global", "sshtunnel", translate("Connection Setting
 s.addremove = false
 s.anonymous = false
 
--- Enable
 en = s:option(Flag, "enabled", translate("Enable tunnel"))
 en.rmempty = false
 
--- VPS IP
 ip = s:option(Value, "vps_ip", translate("VPS IP address"))
 ip.datatype = "ipaddr"
 ip.placeholder = "203.0.113.1"
 ip.rmempty = false
 
--- VPS SSH port
 pt = s:option(Value, "vps_port", translate("VPS SSH port"))
 pt.datatype = "port"
 pt.default = "22"
 pt.placeholder = "22"
 
--- VPS user
 us = s:option(Value, "vps_user", translate("VPS tunnel user"))
 us.default = "tunnel"
 us.placeholder = "tunnel"
 
--- Key path
 kp = s:option(Value, "key_path", translate("Private key path"))
 kp.default = "/root/.ssh/tunnel_key"
 kp.placeholder = "/root/.ssh/tunnel_key"
 
--- ServerAlive interval
 ai = s:option(Value, "alive_interval", translate("ServerAliveInterval (sec)"),
     translate("How often to send keepalive packets"))
 ai.datatype = "uinteger"
 ai.default = "30"
 
--- ServerAlive count
 ac = s:option(Value, "alive_count", translate("ServerAliveCountMax"),
     translate("Disconnect after this many missed keepalives"))
 ac.datatype = "uinteger"
 ac.default = "3"
 
 -- ═══════════════════════════════════════════
--- Private key management
+-- Private key — read-only display + paste field
 -- ═══════════════════════════════════════════
 
 k = m:section(TypedSection, "sshtunnel", translate("Private Key"))
 k.addremove = false
 k.anonymous = true
 
-ka = k:option(TextValue, "_key_content", translate("Private key"))
+-- Show current key (read-only)
+kd = k:option(DummyValue, "_key_display", translate("Current key"))
+function kd.cfgvalue(self, section)
+    local path = m:get("global", "key_path") or "/root/.ssh/tunnel_key"
+    if fs.access(path) then
+        return translate("Key file exists: ") .. path
+    else
+        return translate("No key file found")
+    end
+end
+
+-- Paste new key (only writes if non-empty)
+ka = k:option(TextValue, "_key_paste", translate("Paste new key"),
+    translate("Only paste here to REPLACE the key. Leave empty to keep current key."))
 ka.rows = 8
 ka.wrap = "off"
 ka.rmempty = true
-ka.description = translate("Paste your Ed25519 private key here. It will be saved to the path above.")
 
 function ka.cfgvalue(self, section)
-    local path = m:get("global", "key_path") or "/root/.ssh/tunnel_key"
-    return fs.readfile(path) or ""
+    -- Always show empty — don't load the key into the form
+    return ""
 end
 
 function ka.write(self, section, value)
-    if value and #value > 10 then
+    -- Only write if user actually pasted something
+    if value and value:match("PRIVATE KEY") and #value > 50 then
         local path = m:get("global", "key_path") or "/root/.ssh/tunnel_key"
         local dir = path:match("(.+)/[^/]+$")
         if dir then
             sys.call("mkdir -p " .. dir .. " && chmod 700 " .. dir)
         end
-        fs.writefile(path, value)
+        -- Clean up: trim whitespace but preserve line breaks
+        value = value:gsub("\r\n", "\n"):gsub("^%s+", ""):gsub("%s+$", "")
+        fs.writefile(path, value .. "\n")
         sys.call("chmod 600 " .. path)
     end
+end
+
+-- Don't write anything on remove/empty
+function ka.remove(self, section)
+    return
 end
 
 -- ═══════════════════════════════════════════
@@ -132,31 +145,41 @@ tp.placeholder = "3389"
 tp.rmempty = false
 
 -- ═══════════════════════════════════════════
--- Status
+-- Status & Controls
 -- ═══════════════════════════════════════════
 
 st = m:section(TypedSection, "sshtunnel", translate("Status"))
 st.addremove = false
 st.anonymous = true
 
-btn_start = st:option(Button, "_start", translate("Start tunnel"))
-btn_start.inputtitle = translate("Start")
-btn_start.inputstyle = "apply"
-function btn_start.write()
-    sys.call("/etc/init.d/sshtunnel restart")
+stat = st:option(DummyValue, "_status", translate("Current status"))
+function stat.cfgvalue()
+    local code = sys.call("pgrep -f '/usr/sbin/autossh.*sshtunnel' >/dev/null 2>&1")
+    if code == 0 then
+        return translate("Running")
+    else
+        -- Check if enabled but not running
+        local enabled = m:get("global", "enabled") or "0"
+        if enabled == "1" then
+            return translate("Stopped (should be running — check logs)")
+        else
+            return translate("Stopped")
+        end
+    end
+end
+
+btn_restart = st:option(Button, "_restart", translate("Restart tunnel"))
+btn_restart.inputtitle = translate("Restart")
+btn_restart.inputstyle = "apply"
+function btn_restart.write()
+    sys.call("/etc/init.d/sshtunnel restart 2>/dev/null")
 end
 
 btn_stop = st:option(Button, "_stop", translate("Stop tunnel"))
 btn_stop.inputtitle = translate("Stop")
 btn_stop.inputstyle = "remove"
 function btn_stop.write()
-    sys.call("/etc/init.d/sshtunnel stop")
-end
-
-stat = st:option(DummyValue, "_status", translate("Current status"))
-function stat.cfgvalue()
-    local r = sys.exec("pgrep -f autossh >/dev/null 2>&1 && echo 'Running' || echo 'Stopped'")
-    return r:gsub("%s+$", "")
+    sys.call("/etc/init.d/sshtunnel stop 2>/dev/null")
 end
 
 return m

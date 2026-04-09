@@ -5,28 +5,36 @@
 <h1>Управление туннелями</h1>
 
 <div class="add-form">
-    <h2>Добавить туннель</h2>
+    <h2>{% if edit_index is not none %}Редактировать туннель{% else %}Добавить туннель{% endif %}</h2>
     <form method="post">
+        {% if edit_index is not none %}
+        <input type="hidden" name="action" value="edit">
+        <input type="hidden" name="index" value="{{ edit_index }}">
+        {% else %}
         <input type="hidden" name="action" value="add">
+        {% endif %}
         <div class="form-grid">
             <div class="form-group">
                 <label>Имя:</label>
-                <input type="text" name="name" placeholder="RDP, SMB, Web..." required>
+                <input type="text" name="name" placeholder="RDP, SMB, Web..." value="{{ edit_tunnel.name if edit_tunnel else '' }}" required>
             </div>
             <div class="form-group">
                 <label>Порт VPS <small>(внешний)</small>:</label>
-                <input type="number" name="remote_port" min="1" max="65535" placeholder="3389" required>
+                <input type="number" name="remote_port" min="1" max="65535" placeholder="3389" value="{{ edit_tunnel.remote_port if edit_tunnel else '' }}" required>
             </div>
             <div class="form-group">
                 <label>IP цели <small>(в домашней сети)</small>:</label>
-                <input type="text" name="local_ip" placeholder="192.168.1.100" required>
+                <input type="text" name="local_ip" placeholder="192.168.1.100" value="{{ edit_tunnel.local_ip if edit_tunnel else '' }}" required>
             </div>
             <div class="form-group">
                 <label>Порт цели <small>(локальный)</small>:</label>
-                <input type="number" name="local_port" min="1" max="65535" placeholder="3389" required>
+                <input type="number" name="local_port" min="1" max="65535" placeholder="3389" value="{{ edit_tunnel.local_port if edit_tunnel else '' }}" required>
             </div>
         </div>
-        <button type="submit" class="btn btn-primary">+ Добавить туннель</button>
+        <button type="submit" class="btn btn-primary">{% if edit_index is not none %}💾 Сохранить{% else %}+ Добавить туннель{% endif %}</button>
+        {% if edit_index is not none %}
+        <a href="{{ url_for('tunnels') }}" class="btn">Отмена</a>
+        {% endif %}
     </form>
 </div>
 
@@ -51,14 +59,14 @@
             <td>{{ t.local_ip }}:{{ t.local_port }}</td>
             <td><code>-R 0.0.0.0:{{ t.remote_port }}:{{ t.local_ip }}:{{ t.local_port }}</code></td>
             <td>
-                {% set port_str = ":" ~ t.remote_port|string %}
-                {% if active_tunnels|join(' ') is search(port_str) %}
+                {% if t.remote_port in active_ports %}
                     <span class="badge badge-ok">● Активен</span>
                 {% else %}
                     <span class="badge badge-off">○ Неактивен</span>
                 {% endif %}
             </td>
             <td>
+                <a href="{{ url_for('tunnels', edit=loop.index0) }}" class="btn btn-small">✎</a>
                 <form method="post" style="display:inline">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="index" value="{{ loop.index0 }}">

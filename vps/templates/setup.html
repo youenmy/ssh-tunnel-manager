@@ -28,8 +28,9 @@
         {% if private_key %}
         <div class="key-block">
             <h3>Приватный ключ <small>(скопируйте на роутер)</small></h3>
-            <pre class="key-content" id="private-key">{{ private_key }}</pre>
+            <textarea class="key-content" id="private-key" readonly rows="8">{{ private_key }}</textarea>
             <button class="btn btn-small" onclick="copyKey()">📋 Копировать</button>
+            <span id="copy-status" style="color:var(--accent);font-size:13px;margin-left:8px;display:none">Скопировано!</span>
         </div>
         {% endif %}
         {% if config.public_key %}
@@ -76,8 +77,17 @@
 {% block scripts %}
 <script>
 function copyKey() {
-    navigator.clipboard.writeText(document.getElementById('private-key').textContent)
-        .then(() => alert('Ключ скопирован!'));
+    var el = document.getElementById('private-key');
+    el.select();
+    el.setSelectionRange(0, 99999);
+    try {
+        document.execCommand('copy');
+        var s = document.getElementById('copy-status');
+        s.style.display = 'inline';
+        setTimeout(function(){ s.style.display = 'none'; }, 2000);
+    } catch(e) {
+        alert('Не удалось скопировать. Выделите текст вручную и нажмите Ctrl+C');
+    }
 }
 </script>
 {% endblock %}

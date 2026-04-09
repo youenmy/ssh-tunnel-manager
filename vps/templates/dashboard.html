@@ -37,8 +37,7 @@
             <td>{{ t.remote_port }}</td>
             <td>{{ t.local_ip }}:{{ t.local_port }}</td>
             <td>
-                {% set port_str = ":" ~ t.remote_port|string %}
-                {% if active_tunnels|join(' ') is search(port_str) %}
+                {% if t.remote_port in active_ports %}
                     <span class="badge badge-ok">● Активен</span>
                 {% else %}
                     <span class="badge badge-off">○ Неактивен</span>

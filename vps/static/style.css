@@ -257,6 +257,7 @@ label small {
 
 input[type="text"],
 input[type="number"],
+input[type="password"],
 select {
     background: var(--bg-input);
     border: 1px solid var(--border);
@@ -380,6 +381,17 @@ input:focus, select:focus {
     font-size: 11px;
     max-height: 200px;
     overflow-y: auto;
+}
+
+textarea.key-content {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    color: var(--text-muted);
+    font-family: var(--font);
+    resize: vertical;
 }
 
 /* ── Info Box ── */
