@@ -63,11 +63,13 @@ chmod 700 /root/.ssh
 
 # --- Watchdog cron ---
 echo "[INFO] Installing watchdog..."
-cat > /etc/cron.d/sshtunnel-watchdog << 'CRONEOF'
-*/5 * * * * root /usr/bin/pgrep -f '/usr/sbin/autossh' >/dev/null || /etc/init.d/sshtunnel start 2>/dev/null
-CRONEOF
-/etc/init.d/cron restart 2>/dev/null || true
-echo "[OK] Watchdog installed (checks every 5 min)"
+CRON_LINE="*/5 * * * * pgrep -f '/usr/sbin/autossh' >/dev/null || /etc/init.d/sshtunnel start 2>/dev/null"
+if ! crontab -l 2>/dev/null | grep -q "sshtunnel"; then
+    (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+    echo "[OK] Watchdog installed (checks every 5 min)"
+else
+    echo "[INFO] Watchdog already installed"
+fi
 
 # --- Clear LuCI cache ---
 rm -rf /tmp/luci-modulecache /tmp/luci-indexcache* 2>/dev/null || true
