@@ -42,6 +42,25 @@
     </div>
 
     <div class="step">
+        <h2>2б. Или вставьте публичный ключ роутера</h2>
+        <p>Если ключ сгенерирован на роутере — вставьте сюда публичный ключ. На роутере выполните: <code>cat /root/.ssh/tunnel_key.pub</code></p>
+        <form method="post">
+            <input type="hidden" name="action" value="import_pubkey">
+            <div class="form-group">
+                <label>Публичный ключ (ssh-ed25519 ...):</label>
+                <input type="text" name="pubkey" placeholder="ssh-ed25519 AAAA... comment" required>
+            </div>
+            <button type="submit" class="btn">Сохранить публичный ключ</button>
+        </form>
+        {% if config.public_key %}
+        <div class="key-block">
+            <h3>Текущий публичный ключ</h3>
+            <pre class="key-content">{{ config.public_key }}</pre>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="step">
         <h2>3. Настройка SSHD</h2>
         <p>GatewayPorts определяет, на каком адресе слушают проброшенные порты.</p>
         <form method="post">

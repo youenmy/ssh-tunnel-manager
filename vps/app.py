@@ -144,6 +144,15 @@ def setup():
             save_config(cfg)
             _rebuild_authorized_keys(cfg)
             flash("SSH key generated", "success")
+        elif action == "import_pubkey":
+            pubkey = request.form.get("pubkey", "").strip()
+            if pubkey.startswith("ssh-") and len(pubkey) > 30:
+                cfg["public_key"] = pubkey
+                save_config(cfg)
+                _rebuild_authorized_keys(cfg)
+                flash("Public key saved and authorized_keys updated", "success")
+            else:
+                flash("Invalid public key format (must start with ssh-ed25519 or ssh-rsa)", "error")
         elif action == "apply_sshd":
             gw = request.form.get("gateway_ports", "clientspecified")
             cfg["gateway_ports"] = gw
