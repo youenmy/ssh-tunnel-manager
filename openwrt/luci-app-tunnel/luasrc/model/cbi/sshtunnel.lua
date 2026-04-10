@@ -1,13 +1,13 @@
--- SSH Tunnel Manager — LuCI CBI Model (fixed)
+-- SSH Tunnel Manager — LuCI CBI Model
 local sys   = require "luci.sys"
 local fs    = require "nixio.fs"
-local nixio = require "nixio"
+local http  = require "luci.http"
 
 m = Map("sshtunnel", translate("SSH Tunnel Manager"),
     translate("Manage reverse SSH tunnels to your VPS for remote access to home network services."))
 
 -- ═══════════════════════════════════════════
--- Global settings
+-- Connection Settings
 -- ═══════════════════════════════════════════
 
 s = m:section(NamedSection, "global", "sshtunnel", translate("Connection Settings"))
@@ -35,48 +35,46 @@ kp = s:option(Value, "key_path", translate("Private key path"))
 kp.default = "/root/.ssh/tunnel_key"
 kp.placeholder = "/root/.ssh/tunnel_key"
 
-ai = s:option(Value, "alive_interval", translate("ServerAliveInterval (sec)"),
-    translate("How often to send keepalive packets"))
+ai = s:option(Value, "alive_interval", translate("ServerAliveInterval (sec)"))
 ai.datatype = "uinteger"
 ai.default = "30"
 
-ac = s:option(Value, "alive_count", translate("ServerAliveCountMax"),
-    translate("Disconnect after this many missed keepalives"))
+ac = s:option(Value, "alive_count", translate("ServerAliveCountMax"))
 ac.datatype = "uinteger"
 ac.default = "3"
 
 -- ═══════════════════════════════════════════
--- Private key — read-only display + paste field
+-- Private Key
 -- ═══════════════════════════════════════════
 
-k = m:section(TypedSection, "sshtunnel", translate("Private Key"))
-k.addremove = false
-k.anonymous = true
-
--- Show current key status
-kd = k:option(DummyValue, "_key_display", translate("Current key"))
+kd = s:option(DummyValue, "_key_status", translate("Key status"))
 function kd.cfgvalue(self, section)
     local path = m:get("global", "key_path") or "/root/.ssh/tunnel_key"
     if fs.access(path) then
-        local size = nixio.fs.stat(path, "size") or 0
-        return translate("Key file exists") .. " (" .. size .. " bytes): " .. path
+        -- Show first and last line of key as preview
+        local content = fs.readfile(path) or ""
+        local first = content:match("^([^\n]+)")
+        local last = content:match("([^\n]+)%s*$")
+        if first and last then
+            return first .. "\n...\n" .. last
+        end
+        return translate("Key file exists: ") .. path
     else
         return translate("No key file found")
     end
 end
 
--- Paste field for new key
-ka = k:option(TextValue, "_key_paste", translate("Paste new key"),
-    translate("Paste the private key and click 'Save Key' below. The main Save & Apply button does NOT save the key."))
+ka = s:option(TextValue, "_key_paste", translate("Paste new key"),
+    translate("Paste private key here and click 'Save Key'. The main Save & Apply does NOT touch the key file."))
 ka.rows = 8
 ka.wrap = "off"
 ka.rmempty = true
+ka.optional = true
 
 function ka.cfgvalue(self, section)
     return ""
 end
 
--- Disable default write — key is saved only via the button
 function ka.write(self, section, value)
     return
 end
@@ -85,14 +83,11 @@ function ka.remove(self, section)
     return
 end
 
--- Save Key button
-ks = k:option(Button, "_save_key", translate("Save key to file"))
+ks = s:option(Button, "_save_key", translate(""))
 ks.inputtitle = translate("Save Key")
 ks.inputstyle = "apply"
 
 function ks.write(self, section)
-    -- Read the key from the form submission
-    local http = require "luci.http"
     local val = http.formvalue("cbid.sshtunnel.global._key_paste") or ""
     val = val:gsub("\r\n", "\n"):gsub("^%s+", ""):gsub("%s+$", "")
 
@@ -110,12 +105,9 @@ function ks.write(self, section)
     end
 end
 
--- ═══════════════════════════════════════════
--- Known hosts
--- ═══════════════════════════════════════════
-
-kh = k:option(Button, "_scan_host", translate("Add VPS to known_hosts"))
-kh.inputtitle = translate("Scan & Add")
+-- Scan known_hosts
+kh = s:option(Button, "_scan_host", translate(""))
+kh.inputtitle = translate("Scan & Add to known_hosts")
 kh.inputstyle = "apply"
 
 function kh.write(self, section)
@@ -123,11 +115,12 @@ function kh.write(self, section)
     local vps_port = m:get("global", "vps_port") or "22"
     if vps_ip ~= "" then
         sys.call("ssh-keyscan -t ed25519 -p " .. vps_port .. " " .. vps_ip .. " >> /root/.ssh/known_hosts 2>/dev/null")
+        m.message = translate("VPS added to known_hosts")
     end
 end
 
 -- ═══════════════════════════════════════════
--- Tunnels (dynamic list)
+-- Port Forwards
 -- ═══════════════════════════════════════════
 
 t = m:section(TypedSection, "tunnel", translate("Port Forwards"),
@@ -169,11 +162,10 @@ st.anonymous = true
 
 stat = st:option(DummyValue, "_status", translate("Current status"))
 function stat.cfgvalue()
-    local code = sys.call("pgrep -f '/usr/sbin/autossh.*sshtunnel' >/dev/null 2>&1")
+    local code = sys.call("pgrep -f '/usr/sbin/autossh' >/dev/null 2>&1")
     if code == 0 then
         return translate("Running")
     else
-        -- Check if enabled but not running
         local enabled = m:get("global", "enabled") or "0"
         if enabled == "1" then
             return translate("Stopped (should be running — check logs)")
@@ -181,6 +173,13 @@ function stat.cfgvalue()
             return translate("Stopped")
         end
     end
+end
+
+btn_start = st:option(Button, "_start", translate("Start tunnel"))
+btn_start.inputtitle = translate("Start")
+btn_start.inputstyle = "apply"
+function btn_start.write()
+    sys.call("/etc/init.d/sshtunnel start 2>/dev/null")
 end
 
 btn_restart = st:option(Button, "_restart", translate("Restart tunnel"))
