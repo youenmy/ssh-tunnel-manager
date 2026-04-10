@@ -1,6 +1,7 @@
 -- SSH Tunnel Manager — LuCI CBI Model (fixed)
-local sys = require "luci.sys"
-local fs  = require "nixio.fs"
+local sys   = require "luci.sys"
+local fs    = require "nixio.fs"
+local nixio = require "nixio"
 
 m = Map("sshtunnel", translate("SSH Tunnel Manager"),
     translate("Manage reverse SSH tunnels to your VPS for remote access to home network services."))
@@ -52,47 +53,61 @@ k = m:section(TypedSection, "sshtunnel", translate("Private Key"))
 k.addremove = false
 k.anonymous = true
 
--- Show current key (read-only)
+-- Show current key status
 kd = k:option(DummyValue, "_key_display", translate("Current key"))
 function kd.cfgvalue(self, section)
     local path = m:get("global", "key_path") or "/root/.ssh/tunnel_key"
     if fs.access(path) then
-        return translate("Key file exists: ") .. path
+        local size = nixio.fs.stat(path, "size") or 0
+        return translate("Key file exists") .. " (" .. size .. " bytes): " .. path
     else
         return translate("No key file found")
     end
 end
 
--- Paste new key (only writes if non-empty)
+-- Paste field for new key
 ka = k:option(TextValue, "_key_paste", translate("Paste new key"),
-    translate("Only paste here to REPLACE the key. Leave empty to keep current key."))
+    translate("Paste the private key and click 'Save Key' below. The main Save & Apply button does NOT save the key."))
 ka.rows = 8
 ka.wrap = "off"
 ka.rmempty = true
 
 function ka.cfgvalue(self, section)
-    -- Always show empty — don't load the key into the form
     return ""
 end
 
+-- Disable default write — key is saved only via the button
 function ka.write(self, section, value)
-    -- Only write if user actually pasted something
-    if value and value:match("PRIVATE KEY") and #value > 50 then
+    return
+end
+
+function ka.remove(self, section)
+    return
+end
+
+-- Save Key button
+ks = k:option(Button, "_save_key", translate("Save key to file"))
+ks.inputtitle = translate("Save Key")
+ks.inputstyle = "apply"
+
+function ks.write(self, section)
+    -- Read the key from the form submission
+    local http = require "luci.http"
+    local val = http.formvalue("cbid.sshtunnel.global._key_paste") or ""
+    val = val:gsub("\r\n", "\n"):gsub("^%s+", ""):gsub("%s+$", "")
+
+    if val:match("PRIVATE KEY") and #val > 50 then
         local path = m:get("global", "key_path") or "/root/.ssh/tunnel_key"
         local dir = path:match("(.+)/[^/]+$")
         if dir then
             sys.call("mkdir -p " .. dir .. " && chmod 700 " .. dir)
         end
-        -- Clean up: trim whitespace but preserve line breaks
-        value = value:gsub("\r\n", "\n"):gsub("^%s+", ""):gsub("%s+$", "")
-        fs.writefile(path, value .. "\n")
+        fs.writefile(path, val .. "\n")
         sys.call("chmod 600 " .. path)
+        m.message = translate("Key saved successfully!")
+    else
+        m.message = translate("Error: paste a valid private key (must contain BEGIN/END PRIVATE KEY)")
     end
-end
-
--- Don't write anything on remove/empty
-function ka.remove(self, section)
-    return
 end
 
 -- ═══════════════════════════════════════════

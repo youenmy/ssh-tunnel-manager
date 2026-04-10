@@ -78,8 +78,12 @@
 <script>
 function copyKey() {
     var el = document.getElementById('private-key');
-    el.select();
-    el.setSelectionRange(0, 99999);
+    var text = el.value.replace(/^\s+|\s+$/g, '') + '\n';
+    var tmp = document.createElement('textarea');
+    tmp.value = text;
+    document.body.appendChild(tmp);
+    tmp.select();
+    tmp.setSelectionRange(0, 99999);
     try {
         document.execCommand('copy');
         var s = document.getElementById('copy-status');
@@ -88,6 +92,7 @@ function copyKey() {
     } catch(e) {
         alert('Не удалось скопировать. Выделите текст вручную и нажмите Ctrl+C');
     }
+    document.body.removeChild(tmp);
 }
 </script>
 {% endblock %}

@@ -59,23 +59,23 @@ python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install -q -r "$APP_DIR/requirements.txt"
 
 # --- Generate panel credentials ---
-PANEL_PASS=$(openssl rand -base64 12 | tr -d '/+=')
-
 if id "$PANEL_USER" &>/dev/null; then
-    echo "$PANEL_USER:$PANEL_PASS" | chpasswd
-    ok "Panel user '$PANEL_USER' password updated"
+    # User exists — don't change password on reinstall
+    PANEL_PASS="(не изменён, см. файл credentials или задайте новый: passwd $PANEL_USER)"
+    ok "Panel user '$PANEL_USER' already exists, password unchanged"
 else
+    PANEL_PASS=$(openssl rand -base64 12 | tr -d '/+=')
     useradd --system --no-create-home --shell /usr/sbin/nologin "$PANEL_USER"
     echo "$PANEL_USER:$PANEL_PASS" | chpasswd
     ok "Panel user '$PANEL_USER' created"
-fi
 
-# Save credentials to a file readable only by root
-cat > "$APP_DIR/data/credentials" << EOF
+    # Save credentials to a file readable only by root
+    cat > "$APP_DIR/data/credentials" << EOF
 Panel Login: $PANEL_USER
 Panel Password: $PANEL_PASS
 EOF
-chmod 600 "$APP_DIR/data/credentials"
+    chmod 600 "$APP_DIR/data/credentials"
+fi
 
 # --- Config ---
 if [[ ! -f "$APP_DIR/data/config.json" ]]; then
@@ -126,16 +126,21 @@ fi
 ufw allow "$PORT/tcp" comment "SSH Tunnel Manager UI" > /dev/null 2>&1
 
 ok "Installation complete!"
+
+# Detect server IP
+SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -z "$SERVER_IP" ] && SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || echo "YOUR_SERVER_IP")
+
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║  SSH Tunnel Manager installed!                    ║${NC}"
 echo -e "${GREEN}║                                                   ║${NC}"
-echo -e "${GREEN}║  URL:      http://YOUR_SERVER_IP:${PORT}            ║${NC}"
+echo -e "${GREEN}║  URL:      ${CYAN}http://${SERVER_IP}:${PORT}${GREEN}${NC}"
 echo -e "${GREEN}║                                                   ║${NC}"
-echo -e "${GREEN}║  Login:    ${CYAN}${PANEL_USER}${GREEN}                          ║${NC}"
-echo -e "${GREEN}║  Password: ${CYAN}${PANEL_PASS}${GREEN}               ║${NC}"
+echo -e "${GREEN}║  Login:    ${CYAN}${PANEL_USER}${NC}"
+echo -e "${GREEN}║  Password: ${CYAN}${PANEL_PASS}${NC}"
 echo -e "${GREEN}║                                                   ║${NC}"
-echo -e "${GREEN}║  Credentials saved: ${APP_DIR}/data/credentials     ║${NC}"
-echo -e "${GREEN}║  Change password:   passwd ${PANEL_USER}              ║${NC}"
+echo -e "${GREEN}║  Credentials: ${APP_DIR}/data/credentials${NC}"
+echo -e "${GREEN}║  Change pass: passwd ${PANEL_USER}${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
