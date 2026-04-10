@@ -116,11 +116,18 @@ systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
 
 # --- Ensure sshd config ---
+SSHD_CHANGED=0
 if ! grep -q "^GatewayPorts" /etc/ssh/sshd_config; then
     echo "GatewayPorts clientspecified" >> /etc/ssh/sshd_config
-    systemctl restart sshd
-    ok "GatewayPorts clientspecified added to sshd_config"
+    SSHD_CHANGED=1
+    ok "GatewayPorts clientspecified added"
 fi
+if ! grep -q "^ClientAliveInterval" /etc/ssh/sshd_config; then
+    echo -e "\nClientAliveInterval 30\nClientAliveCountMax 3" >> /etc/ssh/sshd_config
+    SSHD_CHANGED=1
+    ok "ClientAliveInterval added (kills stale sessions after 90s)"
+fi
+[ "$SSHD_CHANGED" = "1" ] && systemctl restart sshd
 
 # --- Firewall ---
 ufw allow "$PORT/tcp" comment "SSH Tunnel Manager UI" > /dev/null 2>&1

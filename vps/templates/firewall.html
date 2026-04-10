@@ -32,7 +32,11 @@
         <input type="hidden" name="action" value="auto_open">
         <button type="submit" class="btn">🔄 Синхронизировать с туннелями</button>
     </form>
-    <p class="muted">Откроет порты для всех настроенных туннелей.</p>
+    <form method="post" style="display:inline; margin-left: 8px">
+        <input type="hidden" name="action" value="cleanup">
+        <button type="submit" class="btn btn-danger" onclick="return confirm('Удалить правила для портов, которых нет в настроенных туннелях?')">🧹 Удалить неиспользуемые</button>
+    </form>
+    <p class="muted" style="margin-top:8px">«Синхронизировать» — откроет порты для всех туннелей. «Удалить неиспользуемые» — удалит правила с комментарием Tunnel: для портов, которых нет в текущих туннелях.</p>
 </div>
 
 <h2>Текущие правила</h2>

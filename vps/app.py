@@ -121,7 +121,7 @@ def setup():
         if action == "create_user":
             username = request.form.get("username", "tunnel").strip()
             if not re.match(r'^[a-z_][a-z0-9_-]*$', username):
-                flash("Invalid username", "error")
+                flash("Некорректное имя пользователя", "error")
                 return redirect(url_for("setup"))
             cfg["tunnel_user"] = username
             r = run(f"id {username} 2>/dev/null", check=False)
@@ -129,9 +129,9 @@ def setup():
                 run(f"useradd --system --create-home --shell /usr/sbin/nologin {username}")
                 run(f"mkdir -p /home/{username}/.ssh && chmod 700 /home/{username}/.ssh")
                 run(f"chown -R {username}:{username} /home/{username}/.ssh")
-                flash(f"User '{username}' created", "success")
+                flash(f"Пользователь '{username}' создан", "success")
             else:
-                flash(f"User '{username}' already exists", "info")
+                flash(f"Пользователь '{username}' уже существует", "info")
             save_config(cfg)
         elif action == "generate_key":
             username = cfg.get("tunnel_user", "tunnel")
@@ -143,16 +143,16 @@ def setup():
             cfg["public_key"] = Path(f"{key_path}.pub").read_text().strip()
             save_config(cfg)
             _rebuild_authorized_keys(cfg)
-            flash("SSH key generated", "success")
+            flash("SSH-ключ сгенерирован", "success")
         elif action == "import_pubkey":
             pubkey = request.form.get("pubkey", "").strip()
             if pubkey.startswith("ssh-") and len(pubkey) > 30:
                 cfg["public_key"] = pubkey
                 save_config(cfg)
                 _rebuild_authorized_keys(cfg)
-                flash("Public key saved and authorized_keys updated", "success")
+                flash("Публичный ключ сохранён, authorized_keys обновлён", "success")
             else:
-                flash("Invalid public key format (must start with ssh-ed25519 or ssh-rsa)", "error")
+                flash("Неверный формат ключа (должен начинаться с ssh-ed25519 или ssh-rsa)", "error")
         elif action == "apply_sshd":
             gw = request.form.get("gateway_ports", "clientspecified")
             cfg["gateway_ports"] = gw
@@ -164,12 +164,12 @@ def setup():
                 sshd_conf += f"\nGatewayPorts {gw}\n"
             Path("/etc/ssh/sshd_config").write_text(sshd_conf)
             run("systemctl restart sshd")
-            flash("sshd_config updated & restarted", "success")
+            flash("sshd_config обновлён и перезапущен", "success")
         elif action == "complete_setup":
             cfg["setup_complete"] = True
             _rebuild_authorized_keys(cfg)
             save_config(cfg)
-            flash("Setup complete!", "success")
+            flash("Настройка завершена!", "success")
             return redirect(url_for("index"))
         return redirect(url_for("setup"))
 
@@ -189,19 +189,19 @@ def tunnels():
             local_ip = request.form.get("local_ip", "").strip()
             local_port = request.form.get("local_port", "").strip()
             if not all([name, remote_port, local_ip, local_port]):
-                flash("All fields required", "error")
+                flash("Все поля обязательны", "error")
                 return redirect(url_for("tunnels"))
             try:
                 rp, lp = int(remote_port), int(local_port)
                 if not (1 <= rp <= 65535 and 1 <= lp <= 65535):
                     raise ValueError
             except ValueError:
-                flash("Ports must be 1-65535", "error")
+                flash("Порты должны быть от 1 до 65535", "error")
                 return redirect(url_for("tunnels"))
             cfg["tunnels"].append({"name": name, "remote_port": rp, "local_ip": local_ip, "local_port": lp})
             save_config(cfg)
             _rebuild_authorized_keys(cfg)
-            flash(f"Tunnel '{name}' added", "success")
+            flash(f"Туннель '{name}' добавлен", "success")
         elif action == "edit":
             idx = int(request.form.get("index", -1))
             if 0 <= idx < len(cfg["tunnels"]):
@@ -210,26 +210,26 @@ def tunnels():
                 local_ip = request.form.get("local_ip", "").strip()
                 local_port = request.form.get("local_port", "").strip()
                 if not all([name, remote_port, local_ip, local_port]):
-                    flash("All fields required", "error")
+                    flash("Все поля обязательны", "error")
                     return redirect(url_for("tunnels", edit=idx))
                 try:
                     rp, lp = int(remote_port), int(local_port)
                     if not (1 <= rp <= 65535 and 1 <= lp <= 65535):
                         raise ValueError
                 except ValueError:
-                    flash("Ports must be 1-65535", "error")
+                    flash("Порты должны быть от 1 до 65535", "error")
                     return redirect(url_for("tunnels", edit=idx))
                 cfg["tunnels"][idx] = {"name": name, "remote_port": rp, "local_ip": local_ip, "local_port": lp}
                 save_config(cfg)
                 _rebuild_authorized_keys(cfg)
-                flash(f"Tunnel '{name}' updated", "success")
+                flash(f"Туннель '{name}' обновлён", "success")
         elif action == "delete":
             idx = int(request.form.get("index", -1))
             if 0 <= idx < len(cfg["tunnels"]):
                 removed = cfg["tunnels"].pop(idx)
                 save_config(cfg)
                 _rebuild_authorized_keys(cfg)
-                flash(f"Tunnel '{removed['name']}' removed", "success")
+                flash(f"Туннель удалён", "success")
         return redirect(url_for("tunnels"))
 
     # GET - check for edit mode
@@ -263,22 +263,45 @@ def firewall():
                 if not (1 <= p <= 65535):
                     raise ValueError
             except ValueError:
-                flash("Invalid port", "error")
+                flash("Некорректный порт", "error")
                 return redirect(url_for("firewall"))
             if source:
                 run(f'ufw allow from {source} to any port {p} proto tcp comment "{comment}"')
             else:
                 run(f'ufw allow {p}/tcp comment "{comment}"')
-            flash(f"Port {p} opened", "success")
+            flash(f"Порт {p} открыт", "success")
         elif action == "close_port":
             rule_num = request.form.get("rule_num", "").strip()
             if rule_num:
                 run(f"ufw --force delete {rule_num}", check=False)
-                flash("Rule deleted", "success")
+                flash("Правило удалено", "success")
         elif action == "auto_open":
             for t in cfg["tunnels"]:
                 run(f'ufw allow {t["remote_port"]}/tcp comment "Tunnel: {t["name"]}"', check=False)
-            flash("Firewall rules synced with tunnels", "success")
+            flash("Правила файрвола синхронизированы с туннелями", "success")
+        elif action == "cleanup":
+            # Get tunnel ports
+            tunnel_ports = {t["remote_port"] for t in cfg["tunnels"]}
+            # Parse ufw status and find Tunnel: rules for ports not in tunnels
+            ufw_out = run("ufw status numbered 2>/dev/null", check=False).stdout
+            removed = 0
+            # Process rules in reverse order (so rule numbers don't shift)
+            rules = []
+            for line in ufw_out.split("\n"):
+                if "Tunnel:" in line:
+                    m = re.search(r'\[\s*(\d+)\].*?(\d+)/tcp', line)
+                    if m:
+                        rule_num = int(m.group(1))
+                        port = int(m.group(2))
+                        if port not in tunnel_ports:
+                            rules.append(rule_num)
+            for rule_num in sorted(rules, reverse=True):
+                run(f"ufw --force delete {rule_num}", check=False)
+                removed += 1
+            if removed:
+                flash(f"Удалено {removed} неиспользуемых правил", "success")
+            else:
+                flash("Нет неиспользуемых правил для удаления", "info")
         return redirect(url_for("firewall"))
     return render_template("firewall.html", config=cfg, ufw_status=get_ufw_status())
 

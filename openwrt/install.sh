@@ -61,13 +61,24 @@ curl -fsSL "$REPO_BASE/luci-app-tunnel/luasrc/model/cbi/sshtunnel.lua" \
 mkdir -p /root/.ssh
 chmod 700 /root/.ssh
 
+# --- Watchdog cron ---
+echo "[INFO] Installing watchdog..."
+cat > /etc/cron.d/sshtunnel-watchdog << 'CRONEOF'
+*/5 * * * * root /usr/bin/pgrep -f '/usr/sbin/autossh' >/dev/null || /etc/init.d/sshtunnel start 2>/dev/null
+CRONEOF
+/etc/init.d/cron restart 2>/dev/null || true
+echo "[OK] Watchdog installed (checks every 5 min)"
+
 # --- Clear LuCI cache ---
 rm -rf /tmp/luci-modulecache /tmp/luci-indexcache* 2>/dev/null || true
 
 echo ""
-echo "╔═══════════════════════════════════════════╗"
-echo "║  Installation complete!                    ║"
-echo "║                                            ║"
-echo "║  Open LuCI: Services -> SSH Tunnel         ║"
-echo "║  Enter VPS IP, paste key, add tunnels      ║"
-echo "╚═══════════════════════════════════════════╝"
+echo "╔═══════════════════════════════════════════════╗"
+echo "║  SSH Tunnel Manager установлен!                ║"
+echo "║                                                ║"
+echo "║  Откройте LuCI: Сервисы -> SSH Tunnel          ║"
+echo "║  Введите IP VPS, вставьте ключ, добавьте       ║"
+echo "║  туннели                                       ║"
+echo "║                                                ║"
+echo "║  Watchdog: проверка каждые 5 минут              ║"
+echo "╚═══════════════════════════════════════════════╝"

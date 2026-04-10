@@ -33,12 +33,6 @@
             <span id="copy-status" style="color:var(--accent);font-size:13px;margin-left:8px;display:none">Скопировано!</span>
         </div>
         {% endif %}
-        {% if config.public_key %}
-        <div class="key-block">
-            <h3>Публичный ключ <small>(установлен на VPS)</small></h3>
-            <pre class="key-content">{{ config.public_key }}</pre>
-        </div>
-        {% endif %}
     </div>
 
     <div class="step">
