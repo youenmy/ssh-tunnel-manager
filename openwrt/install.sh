@@ -1,12 +1,12 @@
 #!/bin/sh
 # ============================================================
-#  SSH Tunnel Manager — OpenWrt Installer
-#  Usage: curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/openwrt/install.sh | sh
+#  SSH Tunnel Manager — OpenWrt Installer (v2 branch)
+#  Usage: curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/v2/openwrt/install.sh | sh
 # ============================================================
 
 set -e
 
-REPO_BASE="https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/openwrt"
+REPO_BASE="https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/v2/openwrt"
 
 echo "╔═══════════════════════════════════════════╗"
 echo "║  SSH Tunnel Manager — OpenWrt Installer   ║"
@@ -69,6 +69,12 @@ if ! crontab -l 2>/dev/null | grep -q "sshtunnel"; then
     echo "[OK] Watchdog installed (checks every 5 min)"
 else
     echo "[INFO] Watchdog already installed"
+fi
+
+# Enable cron service (often disabled by default on OpenWrt)
+if [ -x /etc/init.d/cron ]; then
+    /etc/init.d/cron enable 2>/dev/null
+    /etc/init.d/cron start 2>/dev/null
 fi
 
 # --- Clear LuCI cache ---

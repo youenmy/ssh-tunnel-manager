@@ -4,7 +4,7 @@ config sshtunnel 'global'
     option vps_port '22'
     option vps_user 'tunnel'
     option key_path '/root/.ssh/tunnel_key'
-    option alive_interval '30'
+    option alive_interval '15'
     option alive_count '3'
 
 # Example tunnel — uncomment and edit:

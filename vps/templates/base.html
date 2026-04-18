@@ -22,6 +22,9 @@
             <li><a href="{{ url_for('firewall') }}" class="{% if request.endpoint == 'firewall' %}active{% endif %}">
                 <span class="icon">🛡️</span><span class="nav-label"> Файрвол</span>
             </a></li>
+            <li><a href="{{ url_for('diagnostics') }}" class="{% if request.endpoint == 'diagnostics' %}active{% endif %}">
+                <span class="icon">🩺</span><span class="nav-label"> Диагностика</span>
+            </a></li>
             <li><a href="{{ url_for('setup') }}" class="{% if request.endpoint == 'setup' %}active{% endif %}">
                 <span class="icon">⚙️</span><span class="nav-label"> Настройка</span>
             </a></li>

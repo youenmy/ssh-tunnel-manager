@@ -2,8 +2,8 @@
 set -e
 
 # ============================================================
-#  SSH Tunnel Manager — VPS Installer
-#  Usage: curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/vps/install.sh | sudo bash
+#  SSH Tunnel Manager — VPS Installer (v2 branch)
+#  Usage: curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/v2/vps/install.sh | sudo bash
 # ============================================================
 
 APP_DIR="/opt/ssh-tunnel-manager"
@@ -40,14 +40,14 @@ chmod 700 "$APP_DIR/keys"
 
 # --- Download app files ---
 info "Downloading application files..."
-REPO_BASE="https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/vps"
+REPO_BASE="https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/v2/vps"
 
 for f in app.py requirements.txt; do
     curl -fsSL "$REPO_BASE/$f" -o "$APP_DIR/$f"
 done
 
 mkdir -p "$APP_DIR/templates" "$APP_DIR/static"
-for f in base.html dashboard.html setup.html tunnels.html firewall.html login.html; do
+for f in base.html dashboard.html setup.html tunnels.html firewall.html login.html diagnostics.html; do
     curl -fsSL "$REPO_BASE/templates/$f" -o "$APP_DIR/templates/$f"
 done
 curl -fsSL "$REPO_BASE/static/style.css" -o "$APP_DIR/static/style.css"
@@ -115,19 +115,36 @@ systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
 
-# --- Ensure sshd config ---
+# --- Ensure sshd config via drop-in (safer than editing main sshd_config,
+#     survives unattended-upgrades that may replace /etc/ssh/sshd_config) ---
+SSHD_DROPIN="/etc/ssh/sshd_config.d/99-ssh-tunnel.conf"
 SSHD_CHANGED=0
-if ! grep -q "^GatewayPorts" /etc/ssh/sshd_config; then
-    echo "GatewayPorts clientspecified" >> /etc/ssh/sshd_config
+if [[ ! -f "$SSHD_DROPIN" ]]; then
+    mkdir -p /etc/ssh/sshd_config.d
+    cat > "$SSHD_DROPIN" << 'EOF'
+# Managed by ssh-tunnel-manager.
+# Safe to delete: app will recreate it. Safe to edit: app does not overwrite
+# if the file already exists (only creates it when missing).
+GatewayPorts clientspecified
+ClientAliveInterval 30
+ClientAliveCountMax 3
+EOF
+    chmod 644 "$SSHD_DROPIN"
     SSHD_CHANGED=1
-    ok "GatewayPorts clientspecified added"
+    ok "sshd drop-in installed: $SSHD_DROPIN"
+else
+    info "sshd drop-in already exists: $SSHD_DROPIN (not overwriting)"
 fi
-if ! grep -q "^ClientAliveInterval" /etc/ssh/sshd_config; then
-    echo -e "\nClientAliveInterval 30\nClientAliveCountMax 3" >> /etc/ssh/sshd_config
-    SSHD_CHANGED=1
-    ok "ClientAliveInterval added (kills stale sessions after 90s)"
+
+# Check that main sshd_config includes the drop-in directory (Ubuntu default does)
+if ! sshd -T 2>/dev/null | grep -q "^gatewayports clientspecified"; then
+    warn "sshd is not honouring the drop-in. Check that /etc/ssh/sshd_config has:  Include /etc/ssh/sshd_config.d/*.conf"
 fi
-[ "$SSHD_CHANGED" = "1" ] && systemctl restart sshd
+
+# If the OLD version of this installer modified /etc/ssh/sshd_config directly,
+# we leave those lines alone — drop-in takes precedence and duplicate directives are harmless.
+
+[ "$SSHD_CHANGED" = "1" ] && systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
 
 # --- Firewall ---
 ufw allow "$PORT/tcp" comment "SSH Tunnel Manager UI" > /dev/null 2>&1

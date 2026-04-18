@@ -1,5 +1,11 @@
 #!/bin/sh /etc/rc.common
-# SSH Tunnel Manager — procd init script
+# SSH Tunnel Manager — procd init script (v2)
+#
+# Changes in v2:
+#  - Pre-flight key validation (ssh-keygen -y) prevents procd crash-loop on corrupted key
+#  - Human-readable errors via logger -s (visible in logread with daemon.err priority)
+#  - Faster ServerAliveInterval default (15s)
+#  - Auto-populate known_hosts on first run
 
 START=99
 USE_PROCD=1
@@ -13,22 +19,71 @@ validate_section() {
         'vps_port:port:22' \
         'vps_user:string:tunnel' \
         'key_path:string:/root/.ssh/tunnel_key' \
-        'alive_interval:uinteger:30' \
+        'alive_interval:uinteger:15' \
         'alive_count:uinteger:3'
+}
+
+log_err() {
+    logger -s -t sshtunnel -p daemon.err "$1"
+}
+
+log_info() {
+    logger -t sshtunnel -p daemon.info "$1"
+}
+
+# Returns 0 if key looks valid (can be parsed by ssh-keygen -y)
+check_key() {
+    local path="$1"
+    if ! ssh-keygen -y -f "$path" >/dev/null 2>&1; then
+        return 1
+    fi
+    local perms
+    perms=$(stat -c '%a' "$path" 2>/dev/null)
+    case "$perms" in
+        600|400) ;;
+        *)
+            log_err "Key permissions are $perms — must be 600. Fixing automatically."
+            chmod 600 "$path"
+            ;;
+    esac
+    return 0
 }
 
 start_service() {
     local enabled vps_ip vps_port vps_user key_path alive_interval alive_count
 
     config_load "$CONF"
-    validate_section "global" || return 1
+    validate_section "global" || {
+        log_err "Configuration is invalid. Check /etc/config/sshtunnel"
+        return 1
+    }
 
-    [ "$enabled" = "1" ] || return 0
-    [ -n "$vps_ip" ] || { logger -t sshtunnel "VPS IP not set"; return 1; }
-    [ -f "$key_path" ] || { logger -t sshtunnel "Key not found: $key_path"; return 1; }
+    [ "$enabled" = "1" ] || { log_info "Service disabled in config"; return 0; }
+    [ -n "$vps_ip" ] || { log_err "VPS IP is not set (uci set sshtunnel.global.vps_ip=...)"; return 1; }
 
-    # Build -R arguments from tunnel sections
+    [ -f "$key_path" ] || {
+        log_err "SSH key not found: $key_path. Generate with: ssh-keygen -t ed25519 -f $key_path -N ''"
+        return 1
+    }
+
+    # Key must be parseable (catches the "echo-ed line-wrapped key" disaster)
+    if ! check_key "$key_path"; then
+        log_err "SSH key at $key_path is CORRUPTED (ssh-keygen -y failed)."
+        log_err "Likely cause: file was edited/echoed and lines got broken."
+        log_err "Fix: regenerate with ssh-keygen -t ed25519 -f $key_path -N '' or restore from backup ${key_path}.backup"
+        return 1
+    fi
+
+    # Auto-populate known_hosts
+    if [ ! -s /root/.ssh/known_hosts ] || ! grep -q "^\[*${vps_ip}" /root/.ssh/known_hosts 2>/dev/null; then
+        log_info "Adding $vps_ip to known_hosts"
+        mkdir -p /root/.ssh
+        chmod 700 /root/.ssh
+        ssh-keyscan -t ed25519 -p "$vps_port" "$vps_ip" 2>/dev/null >> /root/.ssh/known_hosts
+    fi
+
     local tunnel_args=""
+    local tunnel_count=0
     build_tunnel() {
         local remote_port local_ip local_port t_enabled
         config_get remote_port "$1" remote_port
@@ -39,20 +94,21 @@ start_service() {
         [ "$t_enabled" = "1" ] || return 0
         [ -n "$remote_port" ] && [ -n "$local_ip" ] && [ -n "$local_port" ] && {
             tunnel_args="$tunnel_args -R 0.0.0.0:${remote_port}:${local_ip}:${local_port}"
+            tunnel_count=$((tunnel_count + 1))
         }
     }
     config_foreach build_tunnel tunnel
 
-    [ -n "$tunnel_args" ] || { logger -t sshtunnel "No tunnels configured"; return 0; }
+    [ -n "$tunnel_args" ] || { log_info "No enabled tunnels configured"; return 0; }
+    log_info "Starting with $tunnel_count tunnel(s) to ${vps_user}@${vps_ip}:${vps_port}"
 
-    # Determine autossh path
     local autossh_bin
     if [ -x /usr/sbin/autossh ]; then
         autossh_bin="/usr/sbin/autossh"
     elif [ -x /usr/bin/autossh ]; then
         autossh_bin="/usr/bin/autossh"
     else
-        logger -t sshtunnel "autossh not found"
+        log_err "autossh not found. Install: apk add autossh  (or: opkg install autossh)"
         return 1
     fi
 
@@ -62,6 +118,7 @@ start_service() {
         -o "ServerAliveCountMax=$alive_count" \
         -o "ExitOnForwardFailure=yes" \
         -o "StrictHostKeyChecking=accept-new" \
+        -o "ConnectTimeout=15" \
         -i "$key_path" \
         -p "$vps_port" \
         $tunnel_args \
@@ -75,4 +132,49 @@ start_service() {
 
 service_triggers() {
     procd_add_reload_trigger "$CONF"
+}
+
+# Custom action: /etc/init.d/sshtunnel diag
+EXTRA_COMMANDS="diag"
+EXTRA_HELP="        diag    Show diagnostic info (key status, process, logs)"
+
+diag() {
+    echo "=== SSH Tunnel Manager diagnostics ==="
+    echo
+    echo "[Service state]"
+    if /etc/init.d/sshtunnel enabled; then
+        echo "  enabled: yes"
+    else
+        echo "  enabled: no"
+    fi
+    echo
+    echo "[Processes]"
+    ps w 2>/dev/null | grep -E 'autossh|ssh ' | grep -v grep || echo "  (none)"
+    echo
+    local key_path
+    key_path=$(uci -q get sshtunnel.global.key_path 2>/dev/null)
+    [ -z "$key_path" ] && key_path=/root/.ssh/tunnel_key
+    echo "[Key file: $key_path]"
+    if [ -f "$key_path" ]; then
+        echo "  size:  $(wc -c < "$key_path") bytes"
+        echo "  perms: $(stat -c '%a' "$key_path")"
+        if ssh-keygen -y -f "$key_path" >/dev/null 2>&1; then
+            echo "  status: VALID"
+            echo "  pubkey: $(ssh-keygen -y -f "$key_path")"
+        else
+            echo "  status: INVALID (ssh-keygen -y failed — key is corrupted)"
+        fi
+    else
+        echo "  NOT FOUND"
+    fi
+    echo
+    echo "[Recent log entries]"
+    logread -e sshtunnel -e autossh 2>/dev/null | tail -15 || echo "  (no entries)"
+    echo
+    echo "Test auth manually with:"
+    local vps_ip vps_port vps_user
+    vps_ip=$(uci -q get sshtunnel.global.vps_ip)
+    vps_port=$(uci -q get sshtunnel.global.vps_port)
+    vps_user=$(uci -q get sshtunnel.global.vps_user)
+    echo "  ssh -v -i $key_path -p $vps_port ${vps_user}@${vps_ip} -N -o ConnectTimeout=10"
 }

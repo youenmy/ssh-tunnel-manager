@@ -10,28 +10,44 @@
                                                          └─ Web (роутер)
 ```
 
+## Версии
+
+- **`main`** — v1 (стабильная, без дополнительных проверок).
+- **`v2`** — текущая активная разработка. Включает:
+  - предстартовую валидацию SSH-ключа (ловит битые файлы до того, как procd уйдёт в крашлуп);
+  - кнопку **«Проверить подключение»** в LuCI (одна проверка — весь диагноз);
+  - показ публичного ключа прямо в LuCI (не нужно `ssh-keygen -y` руками);
+  - автобэкап ключа в `.backup` при замене;
+  - страницу **Диагностика** в VPS-панели (рассинхрон permitlisten, слушающие порты, последние ошибки sshd — в одном месте);
+  - `sshd_config` через drop-in `/etc/ssh/sshd_config.d/99-ssh-tunnel.conf` (переживает `unattended-upgrade`);
+  - более быстрый keepalive (15s вместо 30s).
+
+Устанавливайте v2 только если готовы, что оно сломается. Ниже — команды для v2.
+
+---
+
 ## Состав
 
-| Компонент | Описание |
-|-----------|----------|
-| `vps/` | Flask Web UI + установщик для Ubuntu VPS |
+| Компонент  | Описание                                |
+|------------|-----------------------------------------|
+| `vps/`     | Flask Web UI + установщик для Ubuntu VPS |
 | `openwrt/` | LuCI-приложение + установщик для OpenWrt |
 
 ---
 
-## Установка
+## Установка (v2)
 
 ### 1. VPS (Ubuntu)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/vps/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/v2/vps/install.sh | sudo bash
 ```
 
 После установки в терминале отобразятся логин и пароль для панели.
 Откройте `http://YOUR_VPS_IP:7575` и пройдите мастер настройки:
 
 1. Создание пользователя туннеля
-2. Генерация SSH-ключа (скопируйте приватный ключ для роутера)
+2. Генерация SSH-ключа (скопируйте приватный ключ для роутера) **или** импорт публичного ключа с роутера
 3. Настройка GatewayPorts
 4. Добавление туннелей (произвольные порты)
 
@@ -41,16 +57,17 @@ curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/vps
 ### 2. OpenWrt роутер
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/openwrt/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/v2/openwrt/install.sh | sh
 ```
 
 Откройте LuCI → **Сервисы → SSH Tunnel**:
 
 1. Введите IP и порт VPS
-2. Вставьте приватный ключ (из шага 1)
-3. Нажмите «Scan & Add» для known_hosts
-4. Добавьте нужные туннели
-5. Включите и сохраните
+2. Вставьте приватный ключ (из шага 1 на VPS) **или** посмотрите уже сгенерированный публичный ключ в поле «Статус ключа», скопируйте его на VPS
+3. Нажмите «Добавить VPS в known_hosts»
+4. Нажмите **«Проверить подключение»** — эта кнопка скажет ровно, что не так, если что-то не работает
+5. Добавьте нужные туннели
+6. Включите и сохраните
 
 ---
 
@@ -66,25 +83,25 @@ curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/ope
 2. **VPS панель** → вкладка **Файрвол** → нажмите **Синхронизировать с туннелями**
    - Это откроет порт в UFW
 
-3. **Роутер LuCI** → **Сервисы → SSH Tunnel** → таблица **Port Forwards** → **Add**
+3. **Роутер LuCI** → **Сервисы → SSH Tunnel** → таблица **Проброс портов** → **Add**
    - Заполните те же данные (имя, порт VPS, локальный IP, локальный порт)
    - Нажмите **Save & Apply**
-   - Нажмите **Restart** в блоке Status
+   - Нажмите **Рестарт** в блоке Статус
 
 ### Пример: проброс Proxmox
 
-| Параметр | Значение |
-|----------|----------|
-| Имя | Proxmox |
-| Порт VPS | 8006 |
-| IP устройства | 192.168.1.100 |
-| Локальный порт | 8006 |
+| Параметр       | Значение        |
+|----------------|-----------------|
+| Имя            | Proxmox         |
+| Порт VPS       | 8006            |
+| IP устройства  | 192.168.1.100   |
+| Локальный порт | 8006            |
 
 После добавления Proxmox будет доступен по адресу `https://YOUR_VPS_IP:8006`.
 
 ### Удаление проброса
 
-Удаляйте в **обратном порядке**: сначала на роутере (удалите туннель, Restart), потом на VPS (удалите туннель в панели).
+Удаляйте в **обратном порядке**: сначала на роутере (удалите туннель, Рестарт), потом на VPS (удалите туннель в панели).
 
 ---
 
@@ -95,18 +112,94 @@ curl -fsSL https://raw.githubusercontent.com/youenmy/ssh-tunnel-manager/main/ope
 **Способ А: Ключ генерируется на VPS (рекомендуется при первой установке)**
 1. VPS панель → Настройка → шаг 2 → «Сгенерировать ключ»
 2. Скопируйте приватный ключ
-3. На роутере LuCI → вставьте ключ в поле → нажмите «Save Key»
+3. На роутере LuCI → вставьте ключ в поле → нажмите «Сохранить ключ» (v2 автоматически проверит его и сделает бэкап старого)
 
 **Способ Б: Ключ генерируется на роутере**
-1. На роутере: `ssh-keygen -t ed25519 -f /root/.ssh/tunnel_key -N ""`
-2. Скопируйте публичный ключ: `cat /root/.ssh/tunnel_key.pub`
+1. На роутере в LuCI откройте страницу SSH Tunnel — в поле «Статус ключа» показан публичный ключ
+2. Скопируйте его
 3. VPS панель → Настройка → шаг 2б → вставьте публичный ключ → «Сохранить публичный ключ»
+
+---
+
+## Troubleshooting
+
+### Симптом: "autossh крашится в цикле" в `logread`
+
+Возможные причины и как их диагностировать.
+
+**Сценарий 1: `Load key: error in libcrypto`**
+
+Файл ключа битый — обычно из-за копирования через `echo`, `cat <<EOF` или редактирования, где строки склеились или обрезались.
+
+```bash
+# Проверить вручную:
+ssh-keygen -y -f /root/.ssh/tunnel_key
+# Если возвращает публичный ключ — ok. Если ошибку — ключ битый.
+```
+
+В v2 это ловится до запуска autossh и пишется в `logread` с понятной ошибкой. Исправление:
+
+```bash
+# Либо откат на бэкап (v2 делает его автоматически при замене ключа через LuCI):
+cp /root/.ssh/tunnel_key.backup /root/.ssh/tunnel_key
+
+# Либо регенерация:
+ssh-keygen -t ed25519 -f /root/.ssh/tunnel_key -N "" -C "router-tunnel"
+# И затем скопировать новый pub на VPS
+```
+
+**Сценарий 2: `Permission denied (publickey)`**
+
+Публичный ключ роутера не совпадает с тем, что в `authorized_keys` на VPS. Решение:
+
+1. В LuCI посмотреть поле «Статус ключа» → скопировать публичный ключ
+2. В VPS-панели → Настройка → шаг 2б → вставить → «Сохранить публичный ключ»
+
+**Сценарий 3: `remote forwarding failed for listen port X`**
+
+Порт X не в `permitlisten` ключа на VPS. Исправление:
+
+- VPS панель → Туннели → нажмите любое «Сохранить» → `authorized_keys` будет перестроен
+- или пересоздайте туннель: Удалить → Добавить
+
+**Сценарий 4: `Connection reset` / `Connection timed out`**
+
+- Роутер не имеет интернета: `ping 8.8.8.8` на роутере
+- Или провайдер/firewall блокирует порт 22: попробуйте `nc -zv YOUR_VPS_IP 22`
+- Или VPS упал: проверьте `systemctl status ssh` на VPS
+
+### Симптом: "подключение есть, но туннель не работает"
+
+Откройте в VPS-панели вкладку **Диагностика** — она покажет:
+- расхождения между портами туннелей и `permitlisten` в ключе;
+- слушающие порты на VPS;
+- активные ESTABLISHED-соединения от роутера;
+- последние ошибки из системного лога.
+
+### Команды для быстрой диагностики
+
+**На роутере:**
+```bash
+/etc/init.d/sshtunnel diag    # полный статус (только в v2)
+logread -e sshtunnel -e autossh | tail -30
+ssh-keygen -y -f /root/.ssh/tunnel_key   # проверка валидности ключа
+```
+
+**На VPS:**
+```bash
+# Слушающие порты туннелей:
+ss -tlnp | grep -E '^tcp'
+# Активные соединения:
+ss -tnp state established '( sport = :22 )'
+# Логи:
+journalctl -u ssh --since "1 hour ago" | grep -iE 'tunnel|forward|denied'
+```
 
 ---
 
 ## Удаление
 
-### Удаление с VPS
+### С VPS
 
 ```bash
 systemctl stop ssh-tunnel-manager
@@ -114,17 +207,18 @@ systemctl disable ssh-tunnel-manager
 rm /etc/systemd/system/ssh-tunnel-manager.service
 systemctl daemon-reload
 rm -rf /opt/ssh-tunnel-manager
+rm -f /etc/ssh/sshd_config.d/99-ssh-tunnel.conf   # v2 только
+systemctl restart ssh
 userdel stm-admin
 ufw delete allow 7575/tcp
 ```
 
 Опционально — удалить пользователя туннеля и его ключи:
-
 ```bash
 userdel -r tunnel
 ```
 
-### Удаление с OpenWrt
+### С OpenWrt
 
 ```bash
 /etc/init.d/sshtunnel stop
@@ -134,12 +228,12 @@ rm /etc/config/sshtunnel
 rm /usr/lib/lua/luci/controller/sshtunnel.lua
 rm /usr/lib/lua/luci/model/cbi/sshtunnel.lua
 rm -rf /tmp/luci-modulecache /tmp/luci-indexcache*
+crontab -l | grep -v sshtunnel | crontab -
 ```
 
 Опционально — удалить ключ и known_hosts:
-
 ```bash
-rm /root/.ssh/tunnel_key
+rm /root/.ssh/tunnel_key /root/.ssh/tunnel_key.backup
 rm /root/.ssh/known_hosts
 ```
 
@@ -155,7 +249,7 @@ rm /root/.ssh/known_hosts
 
 ## Требования
 
-- **VPS:** Ubuntu 22.04+, Python 3.10+, UFW, OpenSSH
+- **VPS:** Ubuntu 22.04+, Python 3.10+, UFW, OpenSSH (тестировалось также на Ubuntu 26.04)
 - **Router:** OpenWrt 23.x+ (opkg) или 25.x+ (apk), LuCI
 
 ## Лицензия

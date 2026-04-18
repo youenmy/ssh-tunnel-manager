@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Диагностика — Tunnel Manager{% endblock %}
+
+{% block content %}
+<h1>Диагностика</h1>
+<p class="muted">Одна страница, чтобы быстро понять почему туннель не работает. Всё доступно только для чтения.</p>
+
+<h2>1. Соответствие authorized_keys настроенным туннелям</h2>
+{% if not ak_exists %}
+    <div class="alert alert-error">
+        Файл <code>/home/{{ config.tunnel_user }}/.ssh/authorized_keys</code> не существует.
+        Это значит, что ни один туннель не сможет пробросить порты. Перейдите в Настройку и выполните шаги 1–4.
+    </div>
+{% else %}
+    {% if mismatch %}
+        <div class="alert alert-error">
+            <strong>Рассинхрон!</strong> В ваших туннелях настроены порты, которых нет в authorized_keys (permitlisten):
+            <strong>{{ mismatch | join(', ') }}</strong>.<br>
+            Исправление: откройте вкладку Туннели и нажмите «Сохранить» на любом туннеле — authorized_keys будет перестроен.
+        </div>
+    {% else %}
+        <div class="alert alert-success">✓ Порты туннелей и permitlisten в ключе совпадают.</div>
+    {% endif %}
+
+    <table>
+        <thead><tr><th>Порт</th><th>В настроенных туннелях</th><th>В permitlisten ключа</th></tr></thead>
+        <tbody>
+            {% set all_ports = (tunnel_ports + ak_ports) | unique | sort %}
+            {% for p in all_ports %}
+            <tr>
+                <td>{{ p }}</td>
+                <td>{% if p in tunnel_ports %}<span class="badge badge-ok">есть</span>{% else %}<span class="badge badge-off">нет</span>{% endif %}</td>
+                <td>{% if p in ak_ports %}<span class="badge badge-ok">есть</span>{% else %}<span class="badge badge-off">нет</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <details style="margin-top:12px">
+        <summary>Показать содержимое authorized_keys</summary>
+        <pre class="log-output">{{ ak_content }}</pre>
+    </details>
+{% endif %}
+
+<h2>2. Слушают ли нужные порты на VPS</h2>
+{% if listen_rows %}
+<table>
+    <thead><tr><th>Порт VPS</th><th>Статус</th></tr></thead>
+    <tbody>
+        {% for port, status in listen_rows %}
+        <tr>
+            <td>{{ port }}</td>
+            <td>
+                {% if '✓' in status %}<span class="badge badge-ok">{{ status }}</span>
+                {% else %}<span class="badge badge-off">{{ status }}</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<p class="muted">Если порт «не слушает» — либо роутер не подключён, либо у autossh не получилось забиндить (проверьте GatewayPorts и permitlisten).</p>
+{% else %}
+<p class="muted">Нет настроенных туннелей.</p>
+{% endif %}
+
+<h2>3. Активные SSH-соединения на порту 22</h2>
+<pre class="log-output">{{ established }}</pre>
+<p class="muted">Если здесь нет соединения с IP вашего роутера — туннель не установлен. Проверьте роутер: <code>pgrep -af autossh</code> и <code>logread -e sshtunnel</code>.</p>
+
+<h2>4. Конфигурация sshd</h2>
+<pre class="log-output">{{ sshd_info.effective }}</pre>
+<p class="muted">
+    Drop-in <code>{{ sshd_info.dropin_path }}</code>:
+    {% if sshd_info.dropin_exists %}<span class="badge badge-ok">присутствует</span>
+    {% else %}<span class="badge badge-off">отсутствует</span> — при следующей установке будет создан.{% endif %}
+</p>
+
+<h2>5. Последние ошибки в системном логе (за 1 час)</h2>
+<pre class="log-output">{{ journal_tail }}</pre>
+
+<h2>Что это всё означает</h2>
+<ul>
+    <li><strong>Permission denied (publickey)</strong> на роутере → публичный ключ роутера не совпадает с тем, что в authorized_keys на VPS. Решение: в LuCI посмотреть «Публичный ключ», в VPS-панели Настройка → шаг 2б вставить его.</li>
+    <li><strong>remote forwarding failed</strong> → порт не разрешён в permitlisten. Нажмите «Сохранить» на любом туннеле во вкладке Туннели для перестройки ключа.</li>
+    <li><strong>Permission denied для порта</strong> → GatewayPorts не установлен в clientspecified. Настройка → шаг 3.</li>
+    <li><strong>Connection reset / timeout</strong> → сеть, либо роутер не онлайн, либо sshd упал.</li>
+</ul>
+{% endblock %}

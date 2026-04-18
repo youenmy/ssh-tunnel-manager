@@ -320,6 +320,76 @@ def api_private_key():
         return key_path.read_text(), 200, {"Content-Type": "text/plain"}
     return "No key generated", 404
 
+# ── Diagnostics ─────────────────────────────────────────────
+
+def _diag_authorized_keys(username):
+    """Read authorized_keys and return (exists, content, permitlisten_ports)."""
+    path = Path(f"/home/{username}/.ssh/authorized_keys")
+    if not path.exists():
+        return False, "", []
+    try:
+        content = path.read_text()
+    except PermissionError:
+        # Try via sudo-less read: the file should be readable by the Flask process
+        # if it runs as root (which it does in the systemd unit).
+        content = "(permission denied — panel must run as root)"
+        return True, content, []
+    ports = re.findall(r'permitlisten="[^"]*:(\d+)"', content)
+    return True, content, sorted(set(int(p) for p in ports))
+
+def _diag_established():
+    """List ESTABLISHED ssh connections from the tunnel user."""
+    r = run("ss -tnp state established '( sport = :22 )' 2>/dev/null | head -20", check=False)
+    return r.stdout.strip() or "(нет активных соединений на 22/tcp)"
+
+def _diag_listen_ports(tunnel_ports):
+    """Which tunnel ports are actually listening?"""
+    active = get_active_ports()
+    rows = []
+    for p in sorted(tunnel_ports):
+        status = "✓ слушает" if p in active else "✗ НЕ слушает"
+        rows.append((p, status))
+    return rows
+
+def _diag_journal_tail():
+    """Recent sshd/ssh errors mentioning tunnel user."""
+    r = run("journalctl -u ssh -u sshd --since '1 hour ago' --no-pager 2>/dev/null "
+            "| grep -iE 'tunnel|forward|denied|failed' | tail -30 || true", check=False)
+    return r.stdout.strip() or "(за последний час ошибок нет)"
+
+def _diag_sshd_config():
+    """Show effective GatewayPorts / drop-in status."""
+    r = run("sshd -T 2>/dev/null | grep -iE '^(gatewayports|clientalive)' || true", check=False)
+    dropin = Path("/etc/ssh/sshd_config.d/99-ssh-tunnel.conf")
+    return {
+        "effective": r.stdout.strip() or "(sshd -T не отработал)",
+        "dropin_exists": dropin.exists(),
+        "dropin_path": str(dropin),
+    }
+
+@app.route("/diagnostics")
+@login_required
+def diagnostics():
+    cfg = load_config()
+    username = cfg.get("tunnel_user", "tunnel")
+    ak_exists, ak_content, ak_ports = _diag_authorized_keys(username)
+    tunnel_ports = [t["remote_port"] for t in cfg.get("tunnels", [])]
+    mismatch = sorted(set(tunnel_ports) - set(ak_ports))
+
+    return render_template(
+        "diagnostics.html",
+        config=cfg,
+        ak_exists=ak_exists,
+        ak_content=ak_content,
+        ak_ports=ak_ports,
+        tunnel_ports=tunnel_ports,
+        mismatch=mismatch,
+        established=_diag_established(),
+        listen_rows=_diag_listen_ports(tunnel_ports),
+        journal_tail=_diag_journal_tail(),
+        sshd_info=_diag_sshd_config(),
+    )
+
 if __name__ == "__main__":
     port = int(os.environ.get("STM_PORT", 7575))
     app.run(host="0.0.0.0", port=port, debug=False)
